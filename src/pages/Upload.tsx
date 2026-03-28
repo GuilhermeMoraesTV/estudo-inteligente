@@ -37,8 +37,9 @@ const Upload = () => {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items
-        .filter((item): item is { str: string; [key: string]: unknown } => "str" in item)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pageText = (content.items as any[])
+        .filter((item) => "str" in item)
         .map((item) => item.str)
         .join(" ");
       textoCompleto += pageText + "\n\n";
