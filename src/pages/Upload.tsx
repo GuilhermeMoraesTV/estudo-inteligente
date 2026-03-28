@@ -38,7 +38,8 @@ const Upload = () => {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       const pageText = content.items
-        .map((item: { str?: string }) => ("str" in item ? item.str : ""))
+        .filter((item): item is { str: string; [key: string]: unknown } => "str" in item)
+        .map((item) => item.str)
         .join(" ");
       textoCompleto += pageText + "\n\n";
     }
