@@ -80,36 +80,60 @@ Retorne EXATAMENTE neste formato JSON:
 TEXTO PARA ANÁLISE:
 ${texto}`;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const textoResposta = response.text();
+  const MAX_TENTATIVAS = 3;
+  let tentativa = 0;
+  let atraso = 5000; // 5 segundos inicial
 
-    // Tenta parsear o JSON retornado
-    const dados: RespostaIA = JSON.parse(textoResposta);
+  while (tentativa < MAX_TENTATIVAS) {
+    try {
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const textoResposta = response.text();
 
-    // Validação básica da estrutura
-    if (!dados.resumo || !Array.isArray(dados.questoes) || !Array.isArray(dados.flashcards)) {
-      throw new Error("Estrutura de resposta inválida da IA.");
+      // Tenta parsear o JSON retornado
+      const dados: RespostaIA = JSON.parse(textoResposta);
+
+      // Validação básica da estrutura
+      if (!dados.resumo || !Array.isArray(dados.questoes) || !Array.isArray(dados.flashcards)) {
+        throw new Error("Estrutura de resposta inválida da IA.");
+      }
+
+      if (dados.questoes.length === 0) {
+        throw new Error("A IA não gerou nenhuma questão. Tente novamente com um texto mais longo.");
+      }
+
+      if (dados.flashcards.length === 0) {
+        throw new Error("A IA não gerou nenhum flashcard. Tente novamente.");
+      }
+
+      return dados;
+    } catch (error: any) {
+      const mensagem = error?.message || "";
+
+      // Se for erro de cota/rate limit (429), tenta novamente com backoff
+      if (mensagem.includes("429") || mensagem.includes("quota") || mensagem.includes("Quota")) {
+        tentativa++;
+        if (tentativa >= MAX_TENTATIVAS) {
+          throw new Error(
+            "Cota da API do Gemini excedida. Você atingiu o limite gratuito. Ative o billing no Google Cloud Console ou aguarde alguns minutos e tente novamente."
+          );
+        }
+        console.warn(`Cota excedida. Tentando novamente em ${atraso / 1000}s... (Tentativa ${tentativa}/${MAX_TENTATIVAS})`);
+        await new Promise((resolve) => setTimeout(resolve, atraso));
+        atraso *= 2; // Backoff exponencial
+        continue;
+      }
+
+      if (error instanceof SyntaxError) {
+        throw new Error(
+          "Erro ao processar a resposta da IA. O formato JSON retornado é inválido. Tente novamente."
+        );
+      }
+      throw error;
     }
-
-    if (dados.questoes.length === 0) {
-      throw new Error("A IA não gerou nenhuma questão. Tente novamente com um texto mais longo.");
-    }
-
-    if (dados.flashcards.length === 0) {
-      throw new Error("A IA não gerou nenhum flashcard. Tente novamente.");
-    }
-
-    return dados;
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(
-        "Erro ao processar a resposta da IA. O formato JSON retornado é inválido. Tente novamente."
-      );
-    }
-    throw error;
   }
+
+  throw new Error("Falha após múltiplas tentativas. Tente novamente mais tarde.");
 };
 
 /**
