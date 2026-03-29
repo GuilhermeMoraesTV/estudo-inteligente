@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { calcularEstatisticas } from "../services/firebaseService";
@@ -12,8 +12,7 @@ interface Estatisticas {
   flashcardsPendentes: number;
 }
 
-// Animated counter hook
-const useCounter = (target: number, duration: number = 1500) => {
+const useCounter = (target: number, duration = 1500) => {
   const [count, setCount] = useState(0);
   useEffect(() => {
     if (target === 0) return;
@@ -21,132 +20,48 @@ const useCounter = (target: number, duration: number = 1500) => {
     const increment = target / (duration / 16);
     const timer = setInterval(() => {
       start += increment;
-      if (start >= target) {
-        setCount(target);
-        clearInterval(timer);
-      } else {
-        setCount(Math.floor(start));
-      }
+      if (start >= target) { setCount(target); clearInterval(timer); }
+      else setCount(Math.floor(start));
     }, 16);
     return () => clearInterval(timer);
   }, [target, duration]);
   return count;
 };
 
-// Score ring component
 const ScoreRing = ({ value, size = 80 }: { value: number; size?: number }) => {
   const radius = (size - 10) / 2;
   const circumference = radius * 2 * Math.PI;
   const [animated, setAnimated] = useState(0);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setAnimated(value), 300);
-    return () => clearTimeout(timer);
-  }, [value]);
-
+  useEffect(() => { const t = setTimeout(() => setAnimated(value), 300); return () => clearTimeout(t); }, [value]);
   const offset = circumference - (animated / 100) * circumference;
   const color = value >= 70 ? "#34d399" : value >= 40 ? "#fbbf24" : "#f87171";
-
   return (
     <svg width={size} height={size} className="score-ring">
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="rgba(255,255,255,0.08)"
-        strokeWidth="6"
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke={color}
-        strokeWidth="6"
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        style={{
-          transition: "stroke-dashoffset 1.5s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.5s ease",
-          filter: `drop-shadow(0 0 8px ${color})`,
-        }}
-      />
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="6" />
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
+        strokeDasharray={circumference} strokeDashoffset={offset}
+        style={{ transition: "stroke-dashoffset 1.5s cubic-bezier(0.22,1,0.36,1)", filter: `drop-shadow(0 0 8px ${color})` }} />
     </svg>
   );
 };
 
-// Stat card component
-const StatCard = ({
-  label,
-  value,
-  icon,
-  color,
-  suffix = "",
-  delay = 0,
-}: {
-  label: string;
-  value: number;
-  icon: string;
-  color: string;
-  suffix?: string;
-  delay?: number;
+const StatCard = ({ label, value, icon, color, suffix = "", delay = 0 }: {
+  label: string; value: number; icon: string; color: string; suffix?: string; delay?: number;
 }) => {
-  const count = useCounter(value, 1500);
-
+  const count = useCounter(value);
   return (
-    <div
-      className="stat-card glass rounded-2xl p-5 card-hover opacity-0 animate-fade-in-up"
-      style={{
-        animationDelay: `${delay}ms`,
-        animationFillMode: "forwards",
-        borderColor: `${color}20`,
-      }}
-    >
+    <div className="stat-card glass rounded-2xl p-5 card-hover opacity-0 animate-fade-in-up"
+      style={{ animationDelay: `${delay}ms`, animationFillMode: "forwards", borderColor: `${color}20` }}>
       <div className="flex items-start justify-between mb-4">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
-          style={{ background: `${color}20`, border: `1px solid ${color}30` }}
-        >
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
+          style={{ background: `${color}20`, border: `1px solid ${color}30` }}>
           {icon}
         </div>
         <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{label}</span>
       </div>
       <div className="flex items-end gap-1">
-        <span
-          className="text-3xl font-bold"
-          style={{ fontFamily: "Syne, sans-serif", color }}
-        >
-          {count}
-        </span>
-        {suffix && (
-          <span className="text-lg font-bold mb-0.5" style={{ color }}>{suffix}</span>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Activity chart (mini bars)
-const ActivityBar = ({ value, max, delay }: { value: number; max: number; delay: number }) => {
-  const [h, setH] = useState(0);
-  useEffect(() => {
-    const t = setTimeout(() => setH(max > 0 ? (value / max) * 100 : 0), 500 + delay);
-    return () => clearTimeout(t);
-  }, [value, max, delay]);
-
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="w-6 bg-white/5 rounded-full" style={{ height: "60px" }}>
-        <div
-          className="w-full rounded-full transition-all duration-1000 ease-out"
-          style={{
-            height: `${h}%`,
-            background: "linear-gradient(180deg, #a78bfa, #7c3aed)",
-            marginTop: `${100 - h}%`,
-            boxShadow: h > 10 ? "0 0 10px rgba(139,92,246,0.5)" : "none",
-          }}
-        />
+        <span className="text-3xl font-bold" style={{ fontFamily: "Syne, sans-serif", color }}>{count}</span>
+        {suffix && <span className="text-lg font-bold mb-0.5" style={{ color }}>{suffix}</span>}
       </div>
     </div>
   );
@@ -165,12 +80,8 @@ const Dashboard = () => {
       try {
         const dados = await calcularEstatisticas(usuario.uid);
         setStats(dados);
-      } catch {
-        // silent
-      } finally {
-        setCarregando(false);
-        setTimeout(() => setVisible(true), 100);
-      }
+      } catch { /* silent */ }
+      finally { setCarregando(false); setTimeout(() => setVisible(true), 100); }
     };
     carregar();
   }, [usuario]);
@@ -179,20 +90,16 @@ const Dashboard = () => {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
 
-  // Fake weekly data for illustration
-  const weekData = [3, 7, 5, 9, 4, 8, 6];
-  const maxWeek = Math.max(...weekData);
-
   if (carregando) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="relative w-16 h-16">
             <div className="absolute inset-0 rounded-full border-2 border-violet-500/30 animate-spin-slow" />
-            <div className="absolute inset-2 rounded-full border-2 border-indigo-500/20 animate-spin-slow" style={{animationDirection:'reverse'}} />
+            <div className="absolute inset-2 rounded-full border-2 border-indigo-500/20 animate-spin-slow" style={{ animationDirection: "reverse" }} />
             <div className="absolute inset-0 flex items-center justify-center text-2xl animate-brain-pulse">🧠</div>
           </div>
-          <p className="text-muted-foreground text-sm">Carregando seu progresso...</p>
+          <p className="text-muted-foreground text-sm">Carregando...</p>
         </div>
       </div>
     );
@@ -200,10 +107,8 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Background effects */}
       <div className="fixed inset-0 grid-pattern opacity-20 pointer-events-none" />
       <div className="fixed top-0 right-0 w-[600px] h-[600px] bg-violet-600/5 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed bottom-0 left-0 w-[400px] h-[400px] bg-indigo-600/5 rounded-full blur-[100px] pointer-events-none" />
 
       <Navbar />
 
@@ -217,65 +122,43 @@ const Dashboard = () => {
           <h1 className="text-4xl font-bold" style={{ fontFamily: "Syne, sans-serif" }}>
             <span className="text-gradient">{userName}</span>
           </h1>
-          <p className="mt-2 text-muted-foreground">
-            Pronto para mais um dia de estudos? Seu progresso está evoluindo!
-          </p>
+          <p className="mt-2 text-muted-foreground">Pronto para mais um dia de estudos?</p>
         </div>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            label="Materiais"
-            value={stats?.totalMateriais ?? 0}
-            icon="📚"
-            color="#a78bfa"
-            delay={0}
-          />
-          <StatCard
-            label="Questões"
-            value={stats?.totalRespostas ?? 0}
-            icon="✏️"
-            color="#60a5fa"
-            delay={100}
-          />
-          <div
-            className="stat-card glass rounded-2xl p-5 card-hover opacity-0 animate-fade-in-up col-span-1"
-            style={{ animationDelay: "200ms", animationFillMode: "forwards", borderColor: "#34d39920" }}
-          >
+          <StatCard label="Materiais" value={stats?.totalMateriais ?? 0} icon="📚" color="#a78bfa" delay={0} />
+          <StatCard label="Questões" value={stats?.totalRespostas ?? 0} icon="✏️" color="#60a5fa" delay={100} />
+          <div className="stat-card glass rounded-2xl p-5 card-hover opacity-0 animate-fade-in-up col-span-1"
+            style={{ animationDelay: "200ms", animationFillMode: "forwards", borderColor: "#34d39920" }}>
             <div className="flex items-start justify-between mb-2">
               <ScoreRing value={stats?.taxaAcerto ?? 0} />
-              <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider text-right">Taxa de<br/>Acerto</span>
+              <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider text-right">Taxa de<br />Acerto</span>
             </div>
             <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold" style={{ fontFamily: "Syne, sans-serif", color: (stats?.taxaAcerto ?? 0) >= 70 ? "#34d399" : (stats?.taxaAcerto ?? 0) >= 40 ? "#fbbf24" : "#f87171" }}>
+              <span className="text-3xl font-bold" style={{
+                fontFamily: "Syne, sans-serif",
+                color: (stats?.taxaAcerto ?? 0) >= 70 ? "#34d399" : (stats?.taxaAcerto ?? 0) >= 40 ? "#fbbf24" : "#f87171"
+              }}>
                 {stats?.taxaAcerto ?? 0}
               </span>
               <span className="text-lg font-bold" style={{ color: (stats?.taxaAcerto ?? 0) >= 70 ? "#34d399" : (stats?.taxaAcerto ?? 0) >= 40 ? "#fbbf24" : "#f87171" }}>%</span>
             </div>
           </div>
-          <StatCard
-            label="Flashcards Pendentes"
-            value={stats?.flashcardsPendentes ?? 0}
-            icon="🃏"
-            color={(stats?.flashcardsPendentes ?? 0) > 0 ? "#fbbf24" : "#34d399"}
-            delay={300}
-          />
+          <StatCard label="Flashcards Pendentes" value={stats?.flashcardsPendentes ?? 0} icon="🃏"
+            color={(stats?.flashcardsPendentes ?? 0) > 0 ? "#fbbf24" : "#34d399"} delay={300} />
         </div>
 
-        {/* Main content grid */}
+        {/* Main content */}
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Quick Actions */}
           <div className="lg:col-span-2 space-y-4">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Ações Rápidas
-            </h2>
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Ações Rápidas</h2>
 
-            {/* New Study Card */}
-            <button
-              onClick={() => navigate("/upload")}
+            {/* Estudos Card */}
+            <button onClick={() => navigate("/estudos")}
               className="w-full text-left relative overflow-hidden rounded-2xl p-6 transition-all duration-300 group border border-violet-500/20 hover:border-violet-500/50"
-              style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.15) 0%, rgba(99,102,241,0.08) 100%)" }}
-            >
+              style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.15) 0%, rgba(99,102,241,0.08) 100%)" }}>
               <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
                 style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.2) 0%, rgba(99,102,241,0.12) 100%)" }} />
               <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity">
@@ -284,17 +167,17 @@ const Dashboard = () => {
               <div className="relative">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-lg group-hover:scale-110 transition-transform">
-                    🚀
+                    📚
                   </div>
                   <span className="font-semibold text-white text-lg" style={{ fontFamily: "Syne, sans-serif" }}>
-                    Novo Estudo com IA
+                    Meus Estudos
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  Cole um texto ou envie um PDF. Nossa IA gera questões no estilo concurso e flashcards com repetição espaçada automaticamente.
+                  Acesse seus materiais salvos, retome um assunto ou adicione novo conteúdo para estudar.
                 </p>
                 <div className="mt-4 flex items-center gap-2 text-violet-400 text-sm font-medium">
-                  <span>Começar agora</span>
+                  <span>Ver materiais</span>
                   <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                   </svg>
@@ -302,23 +185,42 @@ const Dashboard = () => {
               </div>
             </button>
 
-            {/* Flashcards Card */}
-            <button
-              onClick={() => navigate("/flashcards")}
+            {/* New Study */}
+            <button onClick={() => navigate("/upload")}
+              className="w-full text-left relative overflow-hidden rounded-2xl p-6 transition-all duration-300 group border border-indigo-500/20 hover:border-indigo-500/50"
+              style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(59,130,246,0.06) 100%)" }}>
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.18), rgba(59,130,246,0.1))" }} />
+              <div className="relative flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-lg group-hover:scale-110 transition-transform shrink-0">
+                  🚀
+                </div>
+                <div>
+                  <span className="font-semibold text-white" style={{ fontFamily: "Syne, sans-serif" }}>Novo Estudo com IA</span>
+                  <p className="text-sm text-muted-foreground mt-1">Upload PDF ou cole texto — a IA identifica assuntos e gera questões automaticamente.</p>
+                  <div className="mt-3 flex items-center gap-2 text-indigo-400 text-sm font-medium">
+                    <span>Começar</span>
+                    <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </button>
+
+            {/* Flashcards */}
+            <button onClick={() => navigate("/flashcards")}
               className="w-full text-left relative overflow-hidden rounded-2xl p-6 transition-all duration-300 group border border-blue-500/20 hover:border-blue-500/50"
-              style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(99,102,241,0.06) 100%)" }}
-            >
-              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-                style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(99,102,241,0.1) 100%)" }} />
+              style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(99,102,241,0.06) 100%)" }}>
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(99,102,241,0.1))" }} />
               <div className="relative flex items-start gap-4">
                 <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-lg group-hover:scale-110 transition-transform shrink-0">
                   🃏
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
-                      Revisar Flashcards
-                    </span>
+                    <span className="font-semibold text-white" style={{ fontFamily: "Syne, sans-serif" }}>Revisar Flashcards</span>
                     {(stats?.flashcardsPendentes ?? 0) > 0 && (
                       <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-yellow-500/20 border border-yellow-500/40 text-yellow-400 text-xs font-bold animate-pulse">
                         {stats?.flashcardsPendentes}
@@ -327,7 +229,7 @@ const Dashboard = () => {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {(stats?.flashcardsPendentes ?? 0) > 0
-                      ? `Você tem ${stats?.flashcardsPendentes} flashcard${stats!.flashcardsPendentes > 1 ? "s" : ""} aguardando revisão`
+                      ? `${stats?.flashcardsPendentes} flashcard${stats!.flashcardsPendentes > 1 ? "s" : ""} aguardando revisão`
                       : "Nenhum flashcard pendente. Continue estudando!"}
                   </p>
                   <div className="mt-3 flex items-center gap-2 text-blue-400 text-sm font-medium">
@@ -343,32 +245,15 @@ const Dashboard = () => {
 
           {/* Right column */}
           <div className="space-y-4">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Atividade Semanal
-            </h2>
-
-            {/* Weekly chart */}
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Conquistas</h2>
             <div className="glass rounded-2xl p-5 opacity-0 animate-fade-in-up" style={{ animationDelay: "400ms", animationFillMode: "forwards" }}>
-              <div className="flex items-end justify-between gap-1 mb-4">
-                {weekData.map((v, i) => (
-                  <ActivityBar key={i} value={v} max={maxWeek} delay={i * 80} />
-                ))}
-              </div>
-              <div className="flex justify-between">
-                {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((d) => (
-                  <span key={d} className="text-[10px] text-muted-foreground">{d}</span>
-                ))}
-              </div>
-            </div>
-
-            {/* Achievement */}
-            <div className="glass rounded-2xl p-5 opacity-0 animate-fade-in-up" style={{ animationDelay: "500ms", animationFillMode: "forwards" }}>
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-3">🏆 Conquistas</p>
               <div className="space-y-2">
                 {[
                   { label: "Primeiro material", done: (stats?.totalMateriais ?? 0) >= 1, icon: "📚" },
                   { label: "10 questões respondidas", done: (stats?.totalRespostas ?? 0) >= 10, icon: "✏️" },
                   { label: "70% de acerto", done: (stats?.taxaAcerto ?? 0) >= 70, icon: "🎯" },
+                  { label: "5 materiais", done: (stats?.totalMateriais ?? 0) >= 5, icon: "🏆" },
+                  { label: "50 questões", done: (stats?.totalRespostas ?? 0) >= 50, icon: "⚡" },
                 ].map((a) => (
                   <div key={a.label} className={`flex items-center gap-3 py-2 px-3 rounded-xl transition-all ${a.done ? "bg-success/10 border border-success/20" : "bg-white/3 border border-white/5"}`}>
                     <span className={a.done ? "" : "grayscale opacity-40"}>{a.icon}</span>
@@ -385,10 +270,9 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* Tip of the day */}
             <div className="rounded-2xl p-5 opacity-0 animate-fade-in-up border border-yellow-500/20"
-              style={{ animationDelay: "600ms", animationFillMode: "forwards", background: "linear-gradient(135deg, rgba(251,191,36,0.08), rgba(245,158,11,0.04))" }}>
-              <p className="text-xs text-yellow-500/80 font-medium uppercase tracking-wider mb-2">💡 Dica de Hoje</p>
+              style={{ animationDelay: "500ms", animationFillMode: "forwards", background: "linear-gradient(135deg, rgba(251,191,36,0.08), rgba(245,158,11,0.04))" }}>
+              <p className="text-xs text-yellow-500/80 font-medium uppercase tracking-wider mb-2">💡 Dica</p>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Revise flashcards todo dia pela manhã. A consistência diária supera sessões longas esporádicas.
               </p>

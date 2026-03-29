@@ -1,5 +1,4 @@
 // Serviço centralizado para operações no Firebase Firestore.
-// Gerencia todas as coleções: users, materiais, questoes, flashcards, historico_respostas.
 
 import {
   collection,
@@ -12,6 +11,7 @@ import {
   where,
   Timestamp,
   updateDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "./firebaseConfig";
 
@@ -26,24 +26,16 @@ export interface PerfilUsuario {
   criadoEm: Timestamp;
 }
 
-/** Cria o perfil do usuário no Firestore após o cadastro */
 export const criarPerfilUsuario = async (uid: string, email: string, nome: string) => {
   await setDoc(doc(db, "users", uid), {
-    uid,
-    email,
-    nome,
-    criadoEm: Timestamp.now(),
+    uid, email, nome, criadoEm: Timestamp.now(),
   });
 };
 
-/** Busca o perfil do usuário */
 export const buscarPerfilUsuario = async (uid: string): Promise<PerfilUsuario | null> => {
   const docRef = doc(db, "users", uid);
   const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    return docSnap.data() as PerfilUsuario;
-  }
-  return null;
+  return docSnap.exists() ? (docSnap.data() as PerfilUsuario) : null;
 };
 
 // ==================== MATERIAIS ====================
@@ -51,30 +43,35 @@ export const buscarPerfilUsuario = async (uid: string): Promise<PerfilUsuario | 
 export interface Material {
   id?: string;
   userId: string;
-  titulo: string;
+  titulo: string;          // título geral
   textoOriginal: string;
   resumo: string;
+  assuntos: AssuntoSalvo[]; // assuntos identificados pela IA
   criadoEm: Timestamp;
 }
 
-/** Salva o material enviado pelo usuário junto com o resumo gerado pela IA */
+export interface AssuntoSalvo {
+  id: string;
+  titulo: string;
+  descricao: string;
+  trecho: string;
+  totalQuestoes?: number;
+}
+
 export const salvarMaterial = async (
   userId: string,
   titulo: string,
   textoOriginal: string,
-  resumo: string
+  resumo: string,
+  assuntos: AssuntoSalvo[]
 ): Promise<string> => {
   const docRef = await addDoc(collection(db, "materiais"), {
-    userId,
-    titulo,
-    textoOriginal,
-    resumo,
+    userId, titulo, textoOriginal, resumo, assuntos,
     criadoEm: Timestamp.now(),
   });
   return docRef.id;
 };
 
-/** Busca todos os materiais do usuário */
 export const buscarMateriaisDoUsuario = async (userId: string): Promise<Material[]> => {
   const q = query(collection(db, "materiais"), where("userId", "==", userId));
   const snapshot = await getDocs(q);
@@ -83,39 +80,50 @@ export const buscarMateriaisDoUsuario = async (userId: string): Promise<Material
     .sort((a, b) => timestampToMillis(b.criadoEm) - timestampToMillis(a.criadoEm));
 };
 
+export const buscarMaterialPorId = async (materialId: string): Promise<Material | null> => {
+  const docRef = doc(db, "materiais", materialId);
+  const docSnap = await getDoc(docRef);
+  return docSnap.exists() ? ({ id: docSnap.id, ...docSnap.data() } as Material) : null;
+};
+
 // ==================== QUESTÕES ====================
 
 export interface Questao {
   id?: string;
   userId: string;
   materialId: string;
+  assuntoId: string;       // qual assunto essa questão pertence
+  assuntoTitulo: string;
   pergunta: string;
   alternativas: string[];
   correta: string;
   explicacao: string;
+  tipo: "simples" | "elaborada";
   criadoEm: Timestamp;
 }
 
-/** Salva uma lista de questões geradas pela IA */
 export const salvarQuestoes = async (
   userId: string,
   materialId: string,
+  assuntoId: string,
+  assuntoTitulo: string,
   questoes: Array<{
     pergunta: string;
     alternativas: string[];
     correta: string;
     explicacao: string;
+    tipo?: "simples" | "elaborada";
   }>
 ): Promise<string[]> => {
   const ids: string[] = [];
   for (const q of questoes) {
     const docRef = await addDoc(collection(db, "questoes"), {
-      userId,
-      materialId,
+      userId, materialId, assuntoId, assuntoTitulo,
       pergunta: q.pergunta,
       alternativas: q.alternativas,
       correta: q.correta,
       explicacao: q.explicacao,
+      tipo: q.tipo || "elaborada",
       criadoEm: Timestamp.now(),
     });
     ids.push(docRef.id);
@@ -123,7 +131,21 @@ export const salvarQuestoes = async (
   return ids;
 };
 
-/** Busca questões de um material específico */
+export const buscarQuestoesPorAssunto = async (
+  userId: string,
+  materialId: string,
+  assuntoId: string
+): Promise<Questao[]> => {
+  const q = query(
+    collection(db, "questoes"),
+    where("userId", "==", userId),
+    where("materialId", "==", materialId),
+    where("assuntoId", "==", assuntoId)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Questao));
+};
+
 export const buscarQuestoesPorMaterial = async (
   userId: string,
   materialId: string
@@ -137,46 +159,41 @@ export const buscarQuestoesPorMaterial = async (
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Questao));
 };
 
-/** Busca todas as questões do usuário */
-export const buscarTodasQuestoesDoUsuario = async (userId: string): Promise<Questao[]> => {
-  const q = query(collection(db, "questoes"), where("userId", "==", userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Questao));
-};
-
 // ==================== FLASHCARDS ====================
 
 export interface Flashcard {
   id?: string;
   userId: string;
   materialId: string;
+  assuntoId: string;
+  assuntoTitulo: string;
+  materialTitulo?: string;
   frente: string;
   verso: string;
+  origem: "gerado" | "erro"; // se veio de questão errada ou gerado automaticamente
   proximaRevisao: Timestamp;
-  intervalo: number; // em dias
-  facilidade: number; // fator de facilidade (padrão: 2.5)
+  intervalo: number;
+  facilidade: number;
   repeticoes: number;
   criadoEm: Timestamp;
 }
 
-/** Salva flashcards gerados pela IA com parâmetros iniciais de repetição espaçada */
 export const salvarFlashcards = async (
   userId: string,
   materialId: string,
-  flashcards: Array<{ frente: string; verso: string }>
+  assuntoId: string,
+  assuntoTitulo: string,
+  flashcards: Array<{ frente: string; verso: string }>,
+  origem: "gerado" | "erro" = "gerado",
+  materialTitulo?: string
 ): Promise<string[]> => {
   const ids: string[] = [];
   const agora = Timestamp.now();
   for (const fc of flashcards) {
     const docRef = await addDoc(collection(db, "flashcards"), {
-      userId,
-      materialId,
-      frente: fc.frente,
-      verso: fc.verso,
-      proximaRevisao: agora,
-      intervalo: 1,
-      facilidade: 2.5,
-      repeticoes: 0,
+      userId, materialId, assuntoId, assuntoTitulo, materialTitulo: materialTitulo || "",
+      frente: fc.frente, verso: fc.verso, origem,
+      proximaRevisao: agora, intervalo: 1, facilidade: 2.5, repeticoes: 0,
       criadoEm: agora,
     });
     ids.push(docRef.id);
@@ -184,7 +201,6 @@ export const salvarFlashcards = async (
   return ids;
 };
 
-/** Busca flashcards pendentes de revisão (data <= agora) */
 export const buscarFlashcardsPendentes = async (userId: string): Promise<Flashcard[]> => {
   const agora = Timestamp.now();
   const q = query(collection(db, "flashcards"), where("userId", "==", userId));
@@ -195,18 +211,26 @@ export const buscarFlashcardsPendentes = async (userId: string): Promise<Flashca
     .sort((a, b) => timestampToMillis(a.proximaRevisao) - timestampToMillis(b.proximaRevisao));
 };
 
-/** Busca todos os flashcards do usuário */
+export const buscarFlashcardsPorAssunto = async (
+  userId: string,
+  assuntoId: string
+): Promise<Flashcard[]> => {
+  const q = query(
+    collection(db, "flashcards"),
+    where("userId", "==", userId),
+    where("assuntoId", "==", assuntoId)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
+};
+
 export const buscarTodosFlashcardsDoUsuario = async (userId: string): Promise<Flashcard[]> => {
   const q = query(collection(db, "flashcards"), where("userId", "==", userId));
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
 };
 
-/** Atualiza os parâmetros de repetição espaçada de um flashcard (algoritmo SM-2 simplificado) */
-export const atualizarFlashcard = async (
-  flashcardId: string,
-  qualidade: number // 0 = errou, 1 = difícil, 2 = fácil
-) => {
+export const atualizarFlashcard = async (flashcardId: string, qualidade: number) => {
   const docRef = doc(db, "flashcards", flashcardId);
   const docSnap = await getDoc(docRef);
   if (!docSnap.exists()) return;
@@ -215,31 +239,14 @@ export const atualizarFlashcard = async (
   let { intervalo, facilidade, repeticoes } = dados;
 
   if (qualidade === 0) {
-    // Errou: resetar
-    intervalo = 1;
-    repeticoes = 0;
-    facilidade = Math.max(1.3, facilidade - 0.2);
+    intervalo = 1; repeticoes = 0; facilidade = Math.max(1.3, facilidade - 0.2);
   } else if (qualidade === 1) {
-    // Difícil: avança pouco
     repeticoes += 1;
-    if (repeticoes === 1) {
-      intervalo = 1;
-    } else if (repeticoes === 2) {
-      intervalo = 3;
-    } else {
-      intervalo = Math.round(intervalo * facilidade * 0.8);
-    }
+    intervalo = repeticoes === 1 ? 1 : repeticoes === 2 ? 3 : Math.round(intervalo * facilidade * 0.8);
     facilidade = Math.max(1.3, facilidade - 0.1);
   } else {
-    // Fácil: avança normalmente
     repeticoes += 1;
-    if (repeticoes === 1) {
-      intervalo = 1;
-    } else if (repeticoes === 2) {
-      intervalo = 6;
-    } else {
-      intervalo = Math.round(intervalo * facilidade);
-    }
+    intervalo = repeticoes === 1 ? 1 : repeticoes === 2 ? 6 : Math.round(intervalo * facilidade);
     facilidade = facilidade + 0.1;
   }
 
@@ -247,14 +254,12 @@ export const atualizarFlashcard = async (
   proximaData.setDate(proximaData.getDate() + intervalo);
 
   await updateDoc(docRef, {
-    intervalo,
-    facilidade,
-    repeticoes,
+    intervalo, facilidade, repeticoes,
     proximaRevisao: Timestamp.fromDate(proximaData),
   });
 };
 
-// ==================== HISTÓRICO DE RESPOSTAS ====================
+// ==================== HISTÓRICO ====================
 
 export interface HistoricoResposta {
   id?: string;
@@ -262,32 +267,31 @@ export interface HistoricoResposta {
   tipo: "questao" | "flashcard";
   itemId: string;
   acertou: boolean;
-  tempoGasto: number; // em segundos
+  tempoGasto: number;
+  assuntoId?: string;
+  assuntoTitulo?: string;
+  pergunta?: string; // para gerar reforço depois
   criadoEm: Timestamp;
 }
 
-/** Registra uma resposta no histórico */
 export const registrarResposta = async (
   userId: string,
   tipo: "questao" | "flashcard",
   itemId: string,
   acertou: boolean,
-  tempoGasto: number
+  tempoGasto: number,
+  extra?: { assuntoId?: string; assuntoTitulo?: string; pergunta?: string }
 ) => {
   await addDoc(collection(db, "historico_respostas"), {
-    userId,
-    tipo,
-    itemId,
-    acertou,
-    tempoGasto,
+    userId, tipo, itemId, acertou, tempoGasto,
+    assuntoId: extra?.assuntoId || "",
+    assuntoTitulo: extra?.assuntoTitulo || "",
+    pergunta: extra?.pergunta || "",
     criadoEm: Timestamp.now(),
   });
 };
 
-/** Busca todo o histórico de respostas do usuário */
-export const buscarHistoricoDoUsuario = async (
-  userId: string
-): Promise<HistoricoResposta[]> => {
+export const buscarHistoricoDoUsuario = async (userId: string): Promise<HistoricoResposta[]> => {
   const q = query(collection(db, "historico_respostas"), where("userId", "==", userId));
   const snapshot = await getDocs(q);
   return snapshot.docs
@@ -295,7 +299,6 @@ export const buscarHistoricoDoUsuario = async (
     .sort((a, b) => timestampToMillis(b.criadoEm) - timestampToMillis(a.criadoEm));
 };
 
-/** Calcula estatísticas gerais do usuário */
 export const calcularEstatisticas = async (userId: string) => {
   const historico = await buscarHistoricoDoUsuario(userId);
   const materiais = await buscarMateriaisDoUsuario(userId);
@@ -307,10 +310,8 @@ export const calcularEstatisticas = async (userId: string) => {
 
   const respostasQuestoes = historico.filter((h) => h.tipo === "questao");
   const acertosQuestoes = respostasQuestoes.filter((h) => h.acertou).length;
-  const taxaAcertoQuestoes =
-    respostasQuestoes.length > 0
-      ? Math.round((acertosQuestoes / respostasQuestoes.length) * 100)
-      : 0;
+  const taxaAcertoQuestoes = respostasQuestoes.length > 0
+    ? Math.round((acertosQuestoes / respostasQuestoes.length) * 100) : 0;
 
   return {
     totalMateriais: materiais.length,

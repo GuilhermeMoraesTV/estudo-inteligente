@@ -1,146 +1,269 @@
 // Serviço centralizado para chamadas à API do Google Gemini.
-// Utiliza o modelo gemini-2.0-flash para extrema rapidez.
-// Todas as respostas são em JSON estruturado.
+// Suporta busca na web para textos curtos e análise de assuntos.
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
 
 if (!API_KEY) {
-  console.warn(
-    "⚠️ VITE_GEMINI_API_KEY não configurada. Adicione-a ao arquivo .env na raiz do projeto."
-  );
+  console.warn("⚠️ VITE_GEMINI_API_KEY não configurada.");
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY || "");
 
-// Formato esperado da resposta da IA
-export interface RespostaIA {
-  resumo: string;
-  questoes: Array<{
-    pergunta: string;
-    alternativas: string[];
-    correta: string;
-    explicacao: string;
-  }>;
-  flashcards: Array<{
-    frente: string;
-    verso: string;
-  }>;
+export interface Assunto {
+  id: string;
+  titulo: string;
+  descricao: string;
+  trecho: string; // trecho do texto original para gerar questões
 }
 
-/**
- * Gera questões, flashcards e resumo a partir de um texto fornecido.
- * Usa JSON Mode para garantir saída estruturada.
- */
-export const gerarConteudoEstudo = async (texto: string): Promise<RespostaIA> => {
-  if (!API_KEY) {
-    throw new Error(
-      "API Key do Gemini não configurada. Defina VITE_GEMINI_API_KEY no arquivo .env."
-    );
+export interface RespostaMapaAssuntos {
+  tituloGeral: string;
+  assuntos: Assunto[];
+}
+
+export interface QuestaoGerada {
+  pergunta: string;
+  alternativas: string[];
+  correta: string;
+  explicacao: string;
+  tipo: "simples" | "elaborada";
+}
+
+export interface RespostaIA {
+  resumo: string;
+  questoes: QuestaoGerada[];
+  flashcards: Array<{ frente: string; verso: string }>;
+}
+
+function extrairJSON(texto: string): string {
+  // Remove markdown code blocks
+  let limpo = texto.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+
+  // Tenta encontrar o JSON válido
+  const inicioObj = limpo.indexOf("{");
+  const fimObj = limpo.lastIndexOf("}");
+  if (inicioObj !== -1 && fimObj !== -1) {
+    limpo = limpo.substring(inicioObj, fimObj + 1);
   }
 
-  const model = genAI.getGenerativeModel({
+  return limpo;
+}
+
+function getModel(jsonMode = true) {
+  return genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     generationConfig: {
-      responseMimeType: "application/json",
+      ...(jsonMode ? { responseMimeType: "application/json" } : {}),
       temperature: 0.7,
       maxOutputTokens: 8192,
     },
   });
+}
 
-  const prompt = `Você é um professor especialista em concursos públicos brasileiros. Analise o texto abaixo e gere conteúdo de estudo de alta qualidade.
+/**
+ * Mapeia assuntos de um texto/arquivo e gera título geral.
+ */
+export const mapearAssuntos = async (texto: string, nomeArquivo?: string): Promise<RespostaMapaAssuntos> => {
+  const model = getModel(false);
 
-REGRAS OBRIGATÓRIAS:
-1. Gere um resumo conciso dos pontos principais do texto.
-2. Gere exatamente 5 questões no estilo de concurso público (múltipla escolha com 5 alternativas: A, B, C, D, E).
-3. Gere exatamente 10 flashcards com conceitos-chave para memorização.
-4. As questões devem testar compreensão profunda, não apenas memorização superficial.
-5. Os flashcards devem ter a frente com uma pergunta/conceito curto e o verso com a resposta objetiva.
+  const prompt = `Você é um especialista em concursos públicos brasileiros. Analise o texto abaixo e identifique os assuntos/tópicos principais.
 
-Retorne EXATAMENTE neste formato JSON:
+${nomeArquivo ? `Nome do arquivo: ${nomeArquivo}` : ""}
+
+TAREFA:
+1. Gere um título geral que represente o material (ex: "Direito Administrativo", "Matemática Financeira")
+2. Identifique de 1 a 5 assuntos/tópicos distintos no texto
+3. Para cada assunto, extraia um trecho relevante do texto original
+
+Retorne APENAS este JSON (sem markdown, sem explicações):
 {
-  "resumo": "String com o resumo dos pontos principais",
-  "questoes": [
+  "tituloGeral": "Título geral do material",
+  "assuntos": [
     {
-      "pergunta": "String com o enunciado da questão",
-      "alternativas": ["A) texto", "B) texto", "C) texto", "D) texto", "E) texto"],
-      "correta": "A) texto (a alternativa completa exata que é a correta)",
-      "explicacao": "String com a justificativa detalhada da resposta correta"
-    }
-  ],
-  "flashcards": [
-    {
-      "frente": "String com o conceito ou pergunta",
-      "verso": "String com a resposta curta e objetiva"
+      "id": "assunto_1",
+      "titulo": "Nome do assunto/tópico",
+      "descricao": "Breve descrição do que será estudado",
+      "trecho": "Trecho do texto original relacionado a este assunto (mínimo 200 caracteres)"
     }
   ]
 }
 
-TEXTO PARA ANÁLISE:
-${texto}`;
+TEXTO:
+${texto.substring(0, 6000)}`;
 
   try {
     const result = await model.generateContent(prompt);
-    const response = result.response;
-    const textoResposta = response.text();
+    const raw = result.response.text();
+    const json = extrairJSON(raw);
+    const dados: RespostaMapaAssuntos = JSON.parse(json);
 
-    // Tenta parsear o JSON retornado
-    const dados: RespostaIA = JSON.parse(textoResposta);
-
-    // Validação básica da estrutura
-    if (!dados.resumo || !Array.isArray(dados.questoes) || !Array.isArray(dados.flashcards)) {
-      throw new Error("Estrutura de resposta inválida da IA.");
-    }
-
-    if (dados.questoes.length === 0) {
-      throw new Error("A IA não gerou nenhuma questão. Tente novamente com um texto mais longo.");
-    }
-
-    if (dados.flashcards.length === 0) {
-      throw new Error("A IA não gerou nenhum flashcard. Tente novamente.");
+    if (!dados.tituloGeral || !Array.isArray(dados.assuntos) || dados.assuntos.length === 0) {
+      throw new Error("Estrutura inválida");
     }
 
     return dados;
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(
-        "Erro ao processar a resposta da IA. O formato JSON retornado é inválido. Tente novamente."
-      );
-    }
-    throw error;
+  } catch (e) {
+    // Fallback: cria um assunto único
+    return {
+      tituloGeral: nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Material de Estudo",
+      assuntos: [
+        {
+          id: "assunto_1",
+          titulo: nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Conteúdo Principal",
+          descricao: "Conteúdo do material enviado",
+          trecho: texto.substring(0, 3000),
+        },
+      ],
+    };
   }
 };
 
 /**
- * Gera feedback personalizado baseado no desempenho do usuário.
+ * Gera questões e flashcards para um assunto específico.
+ * Se o texto for curto, usa conhecimento interno da IA sobre o assunto.
+ */
+export const gerarConteudoParaAssunto = async (
+  assunto: Assunto,
+  tipoQuestao: "simples" | "elaborada" = "elaborada",
+  quantidadeQuestoes = 5
+): Promise<RespostaIA> => {
+  if (!API_KEY) {
+    throw new Error("API Key do Gemini não configurada.");
+  }
+
+  const model = getModel(false);
+
+  const textoBase = assunto.trecho.trim();
+  const usarConhecimentoIA = textoBase.length < 200;
+
+  const instrucaoTipo = tipoQuestao === "simples"
+    ? "Gere questões SIMPLES de memorização (verdadeiro/falso em formato múltipla escolha, definições diretas, conceitos básicos). As alternativas devem ser curtas e objetivas."
+    : "Gere questões ELABORADAS no estilo CESPE/FCC/VUNESP (situações-problema, interpretação, aplicação de conceitos, pegadinhas técnicas). As alternativas devem ser completas e desafiadoras.";
+
+  const fonteDados = usarConhecimentoIA
+    ? `Use seu conhecimento sobre o assunto "${assunto.titulo}" para gerar questões de concurso público.`
+    : `Base de estudo:\n${textoBase.substring(0, 4000)}`;
+
+  const prompt = `Você é professor especialista em concursos públicos brasileiros.
+
+ASSUNTO: ${assunto.titulo}
+TIPO: ${tipoQuestao === "simples" ? "Flash Cards de Memorização" : "Questões Elaboradas de Concurso"}
+
+${fonteDados}
+
+${instrucaoTipo}
+
+Gere exatamente ${quantidadeQuestoes} questões de múltipla escolha (5 alternativas A, B, C, D, E) e 5 flashcards.
+
+Retorne APENAS este JSON válido (sem markdown):
+{
+  "resumo": "Resumo dos principais pontos do assunto em 2-3 frases",
+  "questoes": [
+    {
+      "pergunta": "Enunciado da questão",
+      "alternativas": ["A) texto", "B) texto", "C) texto", "D) texto", "E) texto"],
+      "correta": "A) texto exato da alternativa correta",
+      "explicacao": "Justificativa detalhada da resposta correta",
+      "tipo": "${tipoQuestao}"
+    }
+  ],
+  "flashcards": [
+    {
+      "frente": "Conceito ou pergunta curta",
+      "verso": "Resposta objetiva"
+    }
+  ]
+}`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text();
+    const json = extrairJSON(raw);
+    const dados: RespostaIA = JSON.parse(json);
+
+    if (!dados.questoes || dados.questoes.length === 0) {
+      throw new Error("Nenhuma questão gerada");
+    }
+
+    return dados;
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      throw new Error("Erro ao processar resposta da IA. Tente novamente.");
+    }
+    throw e;
+  }
+};
+
+/**
+ * Gera questões e flashcards extras para reforço (questões erradas).
+ */
+export const gerarReforcoParaQuestao = async (
+  perguntaOriginal: string,
+  assunto: string
+): Promise<RespostaIA> => {
+  if (!API_KEY) throw new Error("API Key não configurada.");
+
+  const model = getModel(false);
+
+  const prompt = `Você é professor de concursos públicos. O aluno errou a seguinte questão:
+
+"${perguntaOriginal}"
+
+Assunto: ${assunto}
+
+Gere 3 questões adicionais sobre este mesmo tema para reforçar o aprendizado, e 3 flashcards de memorização.
+
+Retorne APENAS este JSON (sem markdown):
+{
+  "resumo": "Este assunto requer atenção especial. Veja mais questões para fixar o conteúdo.",
+  "questoes": [
+    {
+      "pergunta": "Questão de reforço",
+      "alternativas": ["A) texto", "B) texto", "C) texto", "D) texto", "E) texto"],
+      "correta": "A) texto exato",
+      "explicacao": "Explicação detalhada",
+      "tipo": "elaborada"
+    }
+  ],
+  "flashcards": [
+    {
+      "frente": "Conceito-chave",
+      "verso": "Definição objetiva"
+    }
+  ]
+}`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text();
+    const json = extrairJSON(raw);
+    return JSON.parse(json);
+  } catch {
+    throw new Error("Erro ao gerar reforço. Tente novamente.");
+  }
+};
+
+/**
+ * Gera feedback personalizado de desempenho.
  */
 export const gerarFeedbackDesempenho = async (
   taxaAcerto: number,
   temasErrados: string[]
 ): Promise<string> => {
-  if (!API_KEY) {
-    return "Configure a API Key do Gemini para receber feedback personalizado.";
-  }
+  if (!API_KEY) return "Configure a API Key para receber feedback personalizado.";
 
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: {
-      temperature: 0.5,
-      maxOutputTokens: 512,
-    },
-  });
+  const model = getModel(false);
 
-  const prompt = `Você é um tutor de concursos públicos. O aluno acabou de terminar uma sessão de estudo com taxa de acerto de ${taxaAcerto}%.
-
-${temasErrados.length > 0 ? `Ele errou questões sobre os seguintes temas: ${temasErrados.join(", ")}.` : "Ele acertou todas as questões."}
-
-Dê um feedback breve, motivador e estratégico (máximo 3 frases). Sugira o que ele deve revisar ou como pode melhorar. Seja direto e objetivo.`;
+  const prompt = `Tutor de concursos públicos. O aluno teve ${taxaAcerto}% de acerto.
+${temasErrados.length > 0 ? `Errou em: ${temasErrados.slice(0, 3).join(", ")}.` : "Acertou tudo."}
+Feedback breve, motivador e estratégico (máximo 2 frases). Seja direto.`;
 
   try {
     const result = await model.generateContent(prompt);
-    return result.response.text();
+    return result.response.text().trim();
   } catch {
-    return "Continue praticando! A consistência é a chave para a aprovação em concursos.";
+    return "Continue praticando! A consistência é a chave para a aprovação.";
   }
 };
