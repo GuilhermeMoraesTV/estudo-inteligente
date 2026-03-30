@@ -12,8 +12,8 @@ import Estudos from "./pages/Estudos";
 import EstudoMaterial from "./pages/EstudoMaterial";
 import Estudo from "./pages/Estudo";
 import Flashcards from "./pages/Flashcards";
+import FlashcardsListaMaterial from "./pages/FlashcardsListaMaterial";
 import NotFound from "./pages/NotFound";
-import "./services/testeIA";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +32,7 @@ const App = () => (
             <Route path="/estudos/:materialId" element={<RotaProtegida><EstudoMaterial /></RotaProtegida>} />
             <Route path="/estudo/:materialId/:assuntoId" element={<RotaProtegida><Estudo /></RotaProtegida>} />
             <Route path="/flashcards" element={<RotaProtegida><Flashcards /></RotaProtegida>} />
+            <Route path="/flashcards/material/:materialId" element={<RotaProtegida><FlashcardsListaMaterial /></RotaProtegida>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

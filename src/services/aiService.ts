@@ -1,13 +1,13 @@
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-async function chamarGemini(prompt: string): Promise<string> {
+async function chamarGemini(prompt: string, temperature = 0.7): Promise<string> {
   const response = await fetch(GEMINI_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+      generationConfig: { temperature, maxOutputTokens: 8192 },
     }),
   });
   if (!response.ok) {
@@ -46,55 +46,66 @@ export interface RespostaIA {
 
 function extrairJSON(texto: string): string {
   let limpo = texto.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
-
   const inicioObj = limpo.indexOf("{");
   const fimObj = limpo.lastIndexOf("}");
-
   if (inicioObj !== -1 && fimObj !== -1) {
     limpo = limpo.substring(inicioObj, fimObj + 1);
   }
-
-  // Corrige vírgulas antes de ] ou }
   limpo = limpo.replace(/,\s*([}\]])/g, "$1");
-
-  // Corrige strings não fechadas no final
   limpo = limpo.replace(/,\s*""\s*}/g, "}");
   limpo = limpo.replace(/,\s*""\s*]/g, "]");
-
   return limpo;
 }
+
+// ==================== MAPEAMENTO DE ASSUNTOS (MELHORADO) ====================
 
 export const mapearAssuntos = async (
   texto: string,
   nomeArquivo?: string
 ): Promise<RespostaMapaAssuntos> => {
-  const prompt = `Você é um especialista em concursos públicos brasileiros. Analise o texto abaixo e identifique os assuntos/tópicos principais.
+  // Estratégia: dividir texto em chunks para análise mais completa
+  const textoTruncado = texto.substring(0, 12000);
+  const totalChars = texto.length;
+  const totalPaginas = Math.ceil(totalChars / 3000);
 
-${nomeArquivo ? `Nome do arquivo: ${nomeArquivo}` : ""}
+  const prompt = `Você é um especialista pedagógico em concursos públicos brasileiros com profundo conhecimento em mapeamento de conteúdo educacional.
 
-TAREFA:
-1. Gere um título geral que represente o material (ex: "Direito Administrativo", "Matemática Financeira")
-2. Identifique de 1 a 5 assuntos/tópicos distintos no texto
-3. Para cada assunto, extraia um trecho relevante do texto original
+ARQUIVO: ${nomeArquivo || "Material de Estudo"}
+TAMANHO ESTIMADO: ~${totalPaginas} páginas
 
-Retorne APENAS este JSON (sem markdown, sem explicações):
+SUA MISSÃO: Analisar o texto abaixo e identificar TODOS os assuntos/tópicos pedagógicos distintos e relevantes para estudo.
+
+REGRAS CRÍTICAS:
+- IGNORE completamente: apresentações, prefácios, sumários, índices, informações sobre bancas, dados editoriais, biografias de autores, instruções de uso do material
+- FOQUE apenas em conteúdo pedagógico real: definições, conceitos, regras, teorias, leis, princípios
+- Identifique de 3 a 8 assuntos principais (nunca menos de 3 se o texto tiver conteúdo)
+- Cada assunto deve ter pelo menos 150 caracteres de trecho relevante
+- Os títulos devem ser específicos (ex: "Concordância Verbal", não apenas "Gramática")
+- Se o texto for sobre uma disciplina específica, mapeie os subtópicos dela
+
+EXEMPLOS DE MAPEAMENTO CORRETO:
+- Português → [Concordância Verbal, Regência Nominal, Crase, Pontuação, Colocação Pronominal]
+- Direito Administrativo → [Atos Administrativos, Licitações, Poderes da Administração, Serviços Públicos]
+- Matemática → [Porcentagem, Juros Simples, Juros Compostos, Regra de Três]
+
+Retorne APENAS este JSON válido (sem markdown, sem texto extra, sem comentários):
 {
-  "tituloGeral": "Título geral do material",
+  "tituloGeral": "Título específico que representa o material (ex: 'Língua Portuguesa - Gramática e Redação')",
   "assuntos": [
     {
       "id": "assunto_1",
-      "titulo": "Nome do assunto/tópico",
-      "descricao": "Breve descrição do que será estudado",
-      "trecho": "Trecho do texto original relacionado a este assunto (mínimo 200 caracteres)"
+      "titulo": "Nome específico e preciso do tópico",
+      "descricao": "O que será estudado neste tópico e sua importância para concursos",
+      "trecho": "Trecho do texto original que contém o conteúdo deste tópico (mínimo 200 caracteres)"
     }
   ]
 }
 
-TEXTO:
-${texto.substring(0, 6000)}`;
+TEXTO PARA ANÁLISE:
+${textoTruncado}`;
 
   try {
-    const raw = await chamarGemini(prompt);
+    const raw = await chamarGemini(prompt, 0.3);
     const json = extrairJSON(raw);
     const dados: RespostaMapaAssuntos = JSON.parse(json);
 
@@ -102,17 +113,26 @@ ${texto.substring(0, 6000)}`;
       throw new Error("Estrutura inválida");
     }
 
-    return dados;
+    // Filtrar assuntos que parecem ser apresentação/sumário
+    const palavrasProibidas = ["apresentação", "prefácio", "sumário", "índice", "sobre o autor", "banca", "edital de referência", "como usar", "introdução ao material"];
+    const assuntosFiltrados = dados.assuntos.filter(a => {
+      const tituloLower = a.titulo.toLowerCase();
+      return !palavrasProibidas.some(p => tituloLower.includes(p));
+    });
+
+    if (assuntosFiltrados.length === 0) {
+      return dados; // retorna original se filtrou tudo
+    }
+
+    return { ...dados, assuntos: assuntosFiltrados };
   } catch (e) {
     console.error("Erro no mapeamento da IA:", e);
     return {
-      tituloGeral:
-        nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Material de Estudo",
+      tituloGeral: nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Material de Estudo",
       assuntos: [
         {
           id: "assunto_1",
-          titulo:
-            nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Conteúdo Principal",
+          titulo: nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Conteúdo Principal",
           descricao: "Conteúdo do material enviado",
           trecho: texto.substring(0, 3000),
         },
@@ -120,6 +140,8 @@ ${texto.substring(0, 6000)}`;
     };
   }
 };
+
+// ==================== GERAÇÃO DE CONTEÚDO (MELHORADO) ====================
 
 export const gerarConteudoParaAssunto = async (
   assunto: Assunto,
@@ -129,50 +151,109 @@ export const gerarConteudoParaAssunto = async (
   const textoBase = assunto.trecho.trim();
   const usarConhecimentoIA = textoBase.length < 200;
 
-  const instrucaoTipo =
-    tipoQuestao === "simples"
-      ? "Gere questões SIMPLES de memorização (verdadeiro/falso em formato múltipla escolha, definições diretas, conceitos básicos). As alternativas devem ser curtas e objetivas."
-      : "Gere questões ELABORADAS no estilo CESPE/FCC/VUNESP (situações-problema, interpretação, aplicação de conceitos, pegadinhas técnicas). As alternativas devem ser completas e desafiadoras.";
-
   const fonteDados = usarConhecimentoIA
-    ? `Use seu conhecimento sobre o assunto "${assunto.titulo}" para gerar questões de concurso público.`
-    : `Base de estudo:\n${textoBase.substring(0, 4000)}`;
+    ? `ASSUNTO PARA GERAR QUESTÕES: "${assunto.titulo}" - ${assunto.descricao}`
+    : `CONTEÚDO DE REFERÊNCIA (use para embasar as questões, mas NÃO mencione o material, apostila ou texto nas questões):
+${textoBase.substring(0, 5000)}`;
 
-  const prompt = `Você é professor especialista em concursos públicos brasileiros.
+  const promptConcurso = `Você é um elaborador sênior de provas de concursos públicos brasileiros com 20 anos de experiência nas bancas CESPE/CEBRASPE, FCC, VUNESP, FGV e ESAF.
 
 ASSUNTO: ${assunto.titulo}
-TIPO: ${tipoQuestao === "simples" ? "Flash Cards de Memorização" : "Questões Elaboradas de Concurso"}
+NÍVEL: Questões elaboradas para concurso público de nível médio/superior
 
 ${fonteDados}
 
-${instrucaoTipo}
+INSTRUÇÕES ABSOLUTAS PARA AS QUESTÕES:
+1. NUNCA mencione "o texto", "o material", "a apostila", "o trecho acima", "conforme apresentado", "segundo o autor" ou qualquer referência ao material
+2. As questões devem ser AUTOSSUFICIENTES — um candidato sem acesso ao material deve conseguir respondê-las
+3. Crie situações-problema reais, casos concretos, aplicações práticas
+4. Use linguagem técnica precisa como nas bancas reais
+5. As alternativas incorretas devem ser plausíveis e conter erros sutis (pegadinhas técnicas)
+6. Varie os verbos: analise, julgue, identifique, assinale, é correto afirmar que...
 
-Gere exatamente ${quantidadeQuestoes} questões de múltipla escolha (5 alternativas A, B, C, D, E) e 5 flashcards.
+INSTRUÇÕES PARA AS EXPLICAÇÕES (MODO CONCURSO - DETALHADAS):
+Para cada questão, a explicação deve ter OBRIGATORIAMENTE:
+- Por que a alternativa correta está certa (fundamentação técnica)
+- Por que CADA alternativa errada está errada (análise individual)
+- Regra/conceito/lei que fundamenta a resposta
+- Dica de memorização para a prova
+Use o formato:
+"✅ CORRETA [LETRA]: [motivo detalhado]
+❌ [LETRA]: [por que está errada]
+❌ [LETRA]: [por que está errada]
+❌ [LETRA]: [por que está errada]
+❌ [LETRA]: [por que está errada]
+📌 CONCEITO-CHAVE: [regra ou fundamento]
+💡 DICA PROVA: [estratégia de memorização]"
 
-IMPORTANTE: Retorne APENAS JSON puro e válido, sem markdown, sem texto antes ou depois.
-Certifique-se que todas as strings estão corretamente fechadas e o JSON está completo.
+Gere exatamente ${quantidadeQuestoes} questões no estilo CESPE/FCC com 5 alternativas (A, B, C, D, E).
 
+Retorne APENAS JSON válido (sem markdown, sem texto antes ou depois):
 {
-  "resumo": "Resumo dos principais pontos do assunto em 2-3 frases",
+  "resumo": "Síntese dos principais pontos do assunto em 2-3 frases objetivas",
   "questoes": [
     {
-      "pergunta": "Enunciado da questão",
-      "alternativas": ["A) texto", "B) texto", "C) texto", "D) texto", "E) texto"],
+      "pergunta": "Enunciado completo e autossuficiente da questão",
+      "alternativas": ["A) texto completo", "B) texto completo", "C) texto completo", "D) texto completo", "E) texto completo"],
       "correta": "A) texto exato da alternativa correta",
-      "explicacao": "Justificativa detalhada da resposta correta",
-      "tipo": "${tipoQuestao}"
+      "explicacao": "Explicação detalhada seguindo o formato acima",
+      "tipo": "elaborada"
     }
   ],
   "flashcards": [
     {
-      "frente": "Conceito ou pergunta curta",
-      "verso": "Resposta objetiva"
+      "frente": "Conceito, definição ou pergunta objetiva sobre ${assunto.titulo}",
+      "verso": "Resposta precisa e completa"
     }
   ]
 }`;
 
+  const promptFlash = `Você é um professor especialista em concursos públicos brasileiros, mestre em técnicas de memorização e estudo ativo.
+
+ASSUNTO: ${assunto.titulo}
+
+${fonteDados}
+
+INSTRUÇÕES PARA QUESTÕES FLASH (MEMORIZAÇÃO):
+1. Questões diretas que testam definições, conceitos e classificações
+2. NUNCA mencione o material, texto ou apostila nas questões
+3. Enunciados curtos e diretos: "Assinale a alternativa CORRETA sobre...", "É CORRETO afirmar que..."
+4. Alternativas curtas e objetivas (máx 15 palavras cada)
+5. Foco em conceitos que costumam cair em prova
+
+INSTRUÇÕES PARA AS EXPLICAÇÕES (MODO FLASH - CONCISAS):
+Cada explicação deve ter:
+- 1 linha explicando a resposta correta
+- Regra-chave em negrito
+- Dica de memorização
+Formato: "✅ [razão objetiva da resposta correta]. 📌 Regra: [conceito fundamental]. 💡 Lembre-se: [mnemônico ou dica]"
+
+Gere exatamente ${quantidadeQuestoes} questões de memorização com 5 alternativas.
+
+Retorne APENAS JSON válido:
+{
+  "resumo": "Pontos-chave do assunto para memorização rápida",
+  "questoes": [
+    {
+      "pergunta": "Enunciado direto sobre ${assunto.titulo}",
+      "alternativas": ["A) texto", "B) texto", "C) texto", "D) texto", "E) texto"],
+      "correta": "A) texto exato",
+      "explicacao": "Explicação concisa seguindo o formato acima",
+      "tipo": "simples"
+    }
+  ],
+  "flashcards": [
+    {
+      "frente": "Conceito ou pergunta flash sobre ${assunto.titulo}",
+      "verso": "Resposta objetiva e memorável"
+    }
+  ]
+}`;
+
+  const prompt = tipoQuestao === "elaborada" ? promptConcurso : promptFlash;
+
   try {
-    const raw = await chamarGemini(prompt);
+    const raw = await chamarGemini(prompt, 0.6);
     const json = extrairJSON(raw);
     const dados: RespostaIA = JSON.parse(json);
 
@@ -184,16 +265,15 @@ Certifique-se que todas as strings estão corretamente fechadas e o JSON está c
   } catch (e) {
     console.error("Erro ao gerar conteúdo:", e);
 
-    // Segunda tentativa com prompt mais compacto
     try {
-      const promptSimples = `Gere ${quantidadeQuestoes} questões sobre "${assunto.titulo}" para concurso público estilo ${tipoQuestao === "elaborada" ? "CESPE" : "simples"}.
-Retorne SOMENTE JSON válido sem texto extra:
-{"resumo":"resumo breve","questoes":[{"pergunta":"pergunta","alternativas":["A) op1","B) op2","C) op3","D) op4","E) op5"],"correta":"A) op1","explicacao":"explicacao","tipo":"${tipoQuestao}"}],"flashcards":[{"frente":"conceito","verso":"definição"}]}`;
+      const promptFallback = `Elabore ${quantidadeQuestoes} questões de concurso público sobre "${assunto.titulo}" no estilo ${tipoQuestao === "elaborada" ? "CESPE com situações-problema" : "memorização direta"}.
+NÃO mencione material, texto ou apostila. Questões autossuficientes.
+JSON válido apenas:
+{"resumo":"síntese do assunto","questoes":[{"pergunta":"questão","alternativas":["A) op1","B) op2","C) op3","D) op4","E) op5"],"correta":"A) op1","explicacao":"✅ CORRETA A: motivo. ❌ B: motivo. 📌 Conceito-chave: fundamento","tipo":"${tipoQuestao}"}],"flashcards":[{"frente":"conceito","verso":"definição"}]}`;
 
-      const raw2 = await chamarGemini(promptSimples);
+      const raw2 = await chamarGemini(promptFallback, 0.5);
       const json2 = extrairJSON(raw2);
       const dados2: RespostaIA = JSON.parse(json2);
-
       if (dados2.questoes?.length > 0) return dados2;
     } catch {
       // fallback final
@@ -203,58 +283,63 @@ Retorne SOMENTE JSON válido sem texto extra:
   }
 };
 
+// ==================== REFORÇO ====================
+
 export const gerarReforcoParaQuestao = async (
   perguntaOriginal: string,
   assunto: string
 ): Promise<RespostaIA> => {
-  const prompt = `Você é professor de concursos públicos. O aluno errou a seguinte questão:
+  const prompt = `Você é um professor de concursos públicos especialista em reforço de aprendizagem.
 
+O aluno errou a seguinte questão sobre ${assunto}:
 "${perguntaOriginal}"
 
-Assunto: ${assunto}
+TAREFA: Gere 3 questões de reforço sobre este mesmo conceito, abordando-o de ângulos diferentes.
+NÃO mencione o texto, material ou apostila.
+As questões devem reforçar especificamente o ponto onde o aluno errou.
 
-Gere 3 questões adicionais sobre este mesmo tema para reforçar o aprendizado, e 3 flashcards de memorização.
-
-Retorne APENAS este JSON (sem markdown):
+Retorne APENAS JSON válido:
 {
-  "resumo": "Este assunto requer atenção especial. Veja mais questões para fixar o conteúdo.",
+  "resumo": "Este ponto requer atenção. Aqui estão questões para solidificar o conceito.",
   "questoes": [
     {
-      "pergunta": "Questão de reforço",
+      "pergunta": "Questão de reforço autossuficiente",
       "alternativas": ["A) texto", "B) texto", "C) texto", "D) texto", "E) texto"],
       "correta": "A) texto exato",
-      "explicacao": "Explicação detalhada",
+      "explicacao": "✅ CORRETA A: [razão]. ❌ B: [razão]. 📌 Conceito-chave: [fundamento]. 💡 Dica: [memorização]",
       "tipo": "elaborada"
     }
   ],
   "flashcards": [
     {
-      "frente": "Conceito-chave",
-      "verso": "Definição objetiva"
+      "frente": "Conceito-chave sobre ${assunto}",
+      "verso": "Definição precisa para memorizar"
     }
   ]
 }`;
 
   try {
-    const raw = await chamarGemini(prompt);
+    const raw = await chamarGemini(prompt, 0.6);
     const json = extrairJSON(raw);
     return JSON.parse(json);
   } catch {
-    return { resumo: "Erro de reforço", questoes: [], flashcards: [] };
+    return { resumo: "Erro ao gerar reforço", questoes: [], flashcards: [] };
   }
 };
+
+// ==================== FEEDBACK ====================
 
 export const gerarFeedbackDesempenho = async (
   taxaAcerto: number,
   temasErrados: string[]
 ): Promise<string> => {
-  const prompt = `Tutor de concursos públicos. O aluno teve ${taxaAcerto}% de acerto.
-${temasErrados.length > 0 ? `Errou em: ${temasErrados.slice(0, 3).join(", ")}.` : "Acertou tudo."}
-Feedback breve, motivador e estratégico (máximo 2 frases). Seja direto.`;
+  const prompt = `Tutor sênior de concursos públicos. O aluno obteve ${taxaAcerto}% de acerto.
+${temasErrados.length > 0 ? `Pontos fracos identificados: ${temasErrados.slice(0, 3).join(", ")}.` : "Desempenho excelente."}
+Forneça feedback motivador, estratégico e específico em no máximo 2 frases. Seja direto e prático.`;
 
   try {
-    return await chamarGemini(prompt);
+    return await chamarGemini(prompt, 0.8);
   } catch {
-    return "Continue praticando! A consistência é a chave para a aprovação.";
+    return "Continue praticando! A consistência diária é o diferencial para a aprovação.";
   }
 };

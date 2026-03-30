@@ -6,19 +6,71 @@ import {
   buscarTodosFlashcardsDoUsuario,
   atualizarFlashcard,
   registrarResposta,
+  buscarPerfilUsuario,
+  atualizarModoRevisao,
   Flashcard,
 } from "../services/firebaseService";
 import Navbar from "../components/Navbar";
 
-// Agrupar por assunto
+type ModoRevisao = "espacada" | "diaria";
+
+// Agrupar por material + assunto
 interface GrupoAssunto {
+  chave: string; // materialId + assuntoId
+  materialId: string;
+  materialTitulo: string;
   assuntoId: string;
   assuntoTitulo: string;
-  materialTitulo: string;
   pendentes: number;
   total: number;
   cards: Flashcard[];
 }
+
+// ---- Seletor de modo de revisão ----
+const SeletorModoRevisao = ({
+  modoAtual,
+  onChange,
+}: {
+  modoAtual: ModoRevisao;
+  onChange: (modo: ModoRevisao) => void;
+}) => (
+  <div className="glass rounded-2xl p-4 border border-white/10">
+    <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-3">
+      Modo de Revisão
+    </p>
+    <div className="flex gap-2">
+      <button
+        onClick={() => onChange("espacada")}
+        className={`flex-1 flex flex-col items-center gap-1.5 py-3 px-3 rounded-xl text-xs font-medium transition-all border ${
+          modoAtual === "espacada"
+            ? "bg-violet-500/20 border-violet-500/40 text-violet-300"
+            : "border-white/10 text-muted-foreground hover:text-white hover:border-white/20"
+        }`}
+      >
+        <span className="text-lg">🧠</span>
+        <span>Espaçada (SM-2)</span>
+        <span className="text-[9px] opacity-60">Intervalos crescentes</span>
+      </button>
+      <button
+        onClick={() => onChange("diaria")}
+        className={`flex-1 flex flex-col items-center gap-1.5 py-3 px-3 rounded-xl text-xs font-medium transition-all border ${
+          modoAtual === "diaria"
+            ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+            : "border-white/10 text-muted-foreground hover:text-white hover:border-white/20"
+        }`}
+      >
+        <span className="text-lg">📅</span>
+        <span>Diária</span>
+        <span className="text-[9px] opacity-60">Revisão todo dia</span>
+      </button>
+    </div>
+    <p className="text-[10px] text-muted-foreground mt-2 text-center">
+      {modoAtual === "espacada"
+        ? "SM-2: Intervalos otimizados para retenção de longo prazo"
+        : "Diária: Todos os flashcards aparecem todos os dias"}
+    </p>
+  </div>
+);
 
 // ---- Empty State ----
 const EmptyState = ({ navigate }: { navigate: (p: string) => void }) => (
@@ -26,16 +78,12 @@ const EmptyState = ({ navigate }: { navigate: (p: string) => void }) => (
     <div className="fixed inset-0 grid-pattern opacity-20 pointer-events-none" />
     <Navbar />
     <div className="relative flex flex-col items-center justify-center min-h-screen gap-6 px-4 text-center">
-      <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-violet-600/20 to-indigo-600/20 border border-violet-500/20 flex items-center justify-center text-5xl animate-float">
-        🃏
-      </div>
+      <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-violet-600/20 to-indigo-600/20 border border-violet-500/20 flex items-center justify-center text-5xl animate-float">🃏</div>
       <div>
         <h2 className="text-2xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>Nenhum flashcard pendente</h2>
-        <p className="mt-2 text-sm text-muted-foreground max-w-xs">
-          Estude um material para gerar flashcards, ou aguarde a próxima data de revisão.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground max-w-xs">Estude um material para gerar flashcards, ou aguarde a próxima data de revisão.</p>
       </div>
-      <button onClick={() => navigate("/estudos")} className="btn-primary px-6 py-3 rounded-2xl text-sm font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+      <button onClick={() => navigate("/estudos")} className="btn-primary px-6 py-3 rounded-2xl text-sm font-bold text-white">
         📚 Ir para Estudos
       </button>
     </div>
@@ -60,7 +108,7 @@ const CompleteState = ({ revisados, navigate }: { revisados: number; navigate: (
         <button onClick={() => navigate("/estudos")} className="glass px-5 py-3 rounded-2xl text-sm font-semibold text-white border border-white/10 hover:bg-white/5 transition-all">
           ← Estudos
         </button>
-        <button onClick={() => window.location.reload()} className="btn-primary px-5 py-3 rounded-2xl text-sm font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+        <button onClick={() => window.location.reload()} className="btn-primary px-5 py-3 rounded-2xl text-sm font-bold text-white">
           🔄 Nova Sessão
         </button>
       </div>
@@ -84,9 +132,12 @@ const RatingButton = ({ label, icon, color, glow, onClick, delay }: {
 
 // ---- Flashcard Session ----
 const FlashcardSession = ({
-  cards, assuntoTitulo, onVoltar,
+  cards, grupo, onVoltar, modoRevisao,
 }: {
-  cards: Flashcard[]; assuntoTitulo: string; onVoltar: () => void;
+  cards: Flashcard[];
+  grupo: GrupoAssunto;
+  onVoltar: () => void;
+  modoRevisao: ModoRevisao;
 }) => {
   const { usuario } = useAuth();
   const navigate = useNavigate();
@@ -114,7 +165,7 @@ const FlashcardSession = ({
     if (!usuario || !flashcardAtual?.id || transitioning) return;
     setTransitioning(true);
     try {
-      await atualizarFlashcard(flashcardAtual.id, qualidade);
+      await atualizarFlashcard(flashcardAtual.id, qualidade, modoRevisao);
       await registrarResposta(usuario.uid, "flashcard", flashcardAtual.id, qualidade > 0, 0);
     } catch { /* silent */ }
     setRevisados((p) => p + 1);
@@ -127,7 +178,7 @@ const FlashcardSession = ({
         } else {
           setConcluido(true);
         }
-      }, 350);
+      }, 400); // tempo para o flip terminar
     }, 150);
   };
 
@@ -146,12 +197,20 @@ const FlashcardSession = ({
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            {assuntoTitulo}
+            <span className="max-w-[200px] truncate">{grupo.assuntoTitulo}</span>
+            {grupo.materialTitulo && (
+              <span className="text-muted-foreground/50">· {grupo.materialTitulo}</span>
+            )}
           </button>
           <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
-            <span className="glass rounded-lg px-3 py-1 font-mono font-bold text-violet-400">
-              {indiceAtual + 1}/{cards.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="glass rounded-lg px-3 py-1 font-mono font-bold text-violet-400">
+                {indiceAtual + 1}/{cards.length}
+              </span>
+              <span className={`px-2 py-0.5 rounded-md text-[10px] border ${modoRevisao === "espacada" ? "bg-violet-500/10 border-violet-500/20 text-violet-400" : "bg-blue-500/10 border-blue-500/20 text-blue-400"}`}>
+                {modoRevisao === "espacada" ? "🧠 SM-2" : "📅 Diária"}
+              </span>
+            </div>
             <div className="flex items-center gap-2">
               <span>{revisados} revisados</span>
               <kbd className="glass rounded px-2 py-0.5 text-[10px]">SPACE</kbd>
@@ -170,17 +229,24 @@ const FlashcardSession = ({
           </div>
         )}
 
-        {/* Card */}
-        <div className="flashcard-container" style={{ height: "280px" }}>
-          <div className={`flashcard-inner ${flipped ? "flipped" : ""} cursor-pointer`}
+        {/* Card com flip */}
+        <div className="flashcard-container" style={{ height: "300px" }}>
+          <div
+            className={`flashcard-inner ${flipped ? "flipped" : ""} cursor-pointer`}
             onClick={handleFlip}
-            style={{ height: "280px", opacity: transitioning ? 0 : 1, transition: "opacity 0.2s ease, transform 0.7s cubic-bezier(0.4,0,0.2,1)" }}>
+            style={{
+              height: "300px",
+              opacity: transitioning ? 0 : 1,
+              transition: "opacity 0.15s ease, transform 0.7s cubic-bezier(0.4,0,0.2,1)",
+            }}
+          >
+            {/* Frente */}
             <div className="flashcard-front glass-strong flex flex-col items-center justify-center p-8 text-center"
               style={{ border: "1px solid rgba(139,92,246,0.2)", background: "rgba(20,18,40,0.8)" }}>
               <div className="mb-4">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/15 border border-violet-500/25 text-violet-400 text-xs font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-                  Conceito
+                  {flashcardAtual?.assuntoTitulo}
                 </span>
               </div>
               <p className="text-lg text-white font-medium leading-relaxed">{flashcardAtual?.frente}</p>
@@ -195,6 +261,7 @@ const FlashcardSession = ({
                 </div>
               )}
             </div>
+            {/* Verso */}
             <div className="flashcard-back flex flex-col items-center justify-center p-8 text-center"
               style={{ border: "1px solid rgba(52,211,153,0.25)", background: "linear-gradient(135deg, rgba(52,211,153,0.08), rgba(16,185,129,0.04))", backdropFilter: "blur(20px)" }}>
               <div className="mb-4">
@@ -214,7 +281,10 @@ const FlashcardSession = ({
         <div className="flex justify-center gap-1 mt-4 mb-6">
           {Array.from({ length: Math.min(cards.length, 7) }, (_, i) => (
             <div key={i} className="h-1 rounded-full transition-all duration-300"
-              style={{ width: i === Math.min(indiceAtual, 6) ? "20px" : "6px", background: i === Math.min(indiceAtual, 6) ? "#a78bfa" : "rgba(255,255,255,0.15)" }} />
+              style={{
+                width: i === Math.min(indiceAtual, 6) ? "20px" : "6px",
+                background: i === Math.min(indiceAtual, 6) ? "#a78bfa" : "rgba(255,255,255,0.15)"
+              }} />
           ))}
         </div>
 
@@ -239,39 +309,55 @@ const Flashcards = () => {
   const navigate = useNavigate();
   const [grupos, setGrupos] = useState<GrupoAssunto[]>([]);
   const [carregando, setCarregando] = useState(true);
-  const [assuntoSelecionado, setAssuntoSelecionado] = useState<GrupoAssunto | null>(null);
+  const [grupoSelecionado, setGrupoSelecionado] = useState<GrupoAssunto | null>(null);
   const [filtroPendentes, setFiltroPendentes] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [modoRevisao, setModoRevisao] = useState<ModoRevisao>("espacada");
+  const [salvandoModo, setSalvandoModo] = useState(false);
 
   useEffect(() => {
     if (!usuario) return;
     const carregar = async () => {
       try {
-        const todos = await buscarTodosFlashcardsDoUsuario(usuario.uid);
-        const pendentes = await buscarFlashcardsPendentes(usuario.uid);
+        const [todos, pendentes, perfil] = await Promise.all([
+          buscarTodosFlashcardsDoUsuario(usuario.uid),
+          buscarFlashcardsPendentes(usuario.uid),
+          buscarPerfilUsuario(usuario.uid),
+        ]);
+
+        if (perfil?.modoRevisao) setModoRevisao(perfil.modoRevisao);
+
         const pendentesIds = new Set(pendentes.map((p) => p.id));
 
-        // Agrupar por assunto
+        // Agrupar por materialId + assuntoId (chave composta para evitar mistura)
         const mapa = new Map<string, GrupoAssunto>();
         for (const fc of todos) {
-          const key = fc.assuntoId || "sem-assunto";
-          if (!mapa.has(key)) {
-            mapa.set(key, {
-              assuntoId: key,
+          const chave = `${fc.materialId || "sem-material"}__${fc.assuntoId || "sem-assunto"}`;
+          if (!mapa.has(chave)) {
+            mapa.set(chave, {
+              chave,
+              materialId: fc.materialId || "",
+              materialTitulo: fc.materialTitulo || "Sem material",
+              assuntoId: fc.assuntoId || "sem-assunto",
               assuntoTitulo: fc.assuntoTitulo || "Geral",
-              materialTitulo: fc.materialTitulo || "",
               pendentes: 0,
               total: 0,
               cards: [],
             });
           }
-          const g = mapa.get(key)!;
+          const g = mapa.get(chave)!;
           g.total++;
           g.cards.push(fc);
           if (pendentesIds.has(fc.id)) g.pendentes++;
         }
 
-        setGrupos(Array.from(mapa.values()).sort((a, b) => b.pendentes - a.pendentes));
+        setGrupos(
+          Array.from(mapa.values()).sort((a, b) => {
+            // Ordenar: primeiro por material, depois por assunto
+            if (a.materialTitulo !== b.materialTitulo) return a.materialTitulo.localeCompare(b.materialTitulo);
+            return b.pendentes - a.pendentes;
+          })
+        );
       } catch { /* silent */ }
       finally {
         setCarregando(false);
@@ -280,6 +366,16 @@ const Flashcards = () => {
     };
     carregar();
   }, [usuario]);
+
+  const handleModoRevisao = async (modo: ModoRevisao) => {
+    setModoRevisao(modo);
+    if (!usuario) return;
+    setSalvandoModo(true);
+    try {
+      await atualizarModoRevisao(usuario.uid, modo);
+    } catch { /* silent */ }
+    finally { setSalvandoModo(false); }
+  };
 
   if (carregando) {
     return (
@@ -295,14 +391,11 @@ const Flashcards = () => {
     );
   }
 
-  if (assuntoSelecionado) {
+  if (grupoSelecionado) {
+    const agora = Date.now();
     const cards = filtroPendentes
-      ? assuntoSelecionado.cards.filter((c) => {
-          const agora = Date.now();
-          const prox = c.proximaRevisao?.toMillis?.() ?? 0;
-          return prox <= agora;
-        })
-      : assuntoSelecionado.cards;
+      ? grupoSelecionado.cards.filter((c) => (c.proximaRevisao?.toMillis?.() ?? 0) <= agora)
+      : grupoSelecionado.cards;
 
     if (cards.length === 0) {
       return (
@@ -311,7 +404,7 @@ const Flashcards = () => {
           <div className="flex flex-col items-center justify-center min-h-screen gap-4">
             <span className="text-4xl">📭</span>
             <p className="text-muted-foreground">Nenhum flashcard pendente neste assunto.</p>
-            <button onClick={() => setAssuntoSelecionado(null)} className="text-violet-400 hover:underline text-sm">← Voltar</button>
+            <button onClick={() => setGrupoSelecionado(null)} className="text-violet-400 hover:underline text-sm">← Voltar</button>
           </div>
         </div>
       );
@@ -320,8 +413,9 @@ const Flashcards = () => {
     return (
       <FlashcardSession
         cards={cards}
-        assuntoTitulo={assuntoSelecionado.assuntoTitulo}
-        onVoltar={() => setAssuntoSelecionado(null)}
+        grupo={grupoSelecionado}
+        onVoltar={() => setGrupoSelecionado(null)}
+        modoRevisao={modoRevisao}
       />
     );
   }
@@ -329,6 +423,9 @@ const Flashcards = () => {
   const totalPendentes = grupos.reduce((acc, g) => acc + g.pendentes, 0);
 
   if (grupos.length === 0) return <EmptyState navigate={navigate} />;
+
+  // Agrupar por material para exibição
+  const materiaisUnicos = Array.from(new Set(grupos.map((g) => g.materialId)));
 
   return (
     <div className="min-h-screen bg-background">
@@ -339,7 +436,7 @@ const Flashcards = () => {
       <main className="relative mx-auto max-w-4xl px-4 pt-24 pb-16">
         {/* Header */}
         <div className={`mb-8 transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}>
-          <span className="text-xs font-medium text-violet-400 uppercase tracking-widest">Repetição Espaçada</span>
+          <span className="text-xs font-medium text-violet-400 uppercase tracking-widest">Repetição</span>
           <h1 className="text-4xl font-bold text-white mt-2" style={{ fontFamily: "Syne, sans-serif" }}>Flashcards</h1>
           <p className="mt-2 text-muted-foreground">
             {totalPendentes > 0
@@ -348,18 +445,20 @@ const Flashcards = () => {
           </p>
         </div>
 
+        {/* Seletor de modo */}
+        <div className={`mb-6 transition-all duration-700 delay-100 ${visible ? "opacity-100" : "opacity-0"}`}>
+          <SeletorModoRevisao modoAtual={modoRevisao} onChange={handleModoRevisao} />
+          {salvandoModo && <p className="text-xs text-muted-foreground mt-1 text-center">Salvando preferência...</p>}
+        </div>
+
         {/* Filter */}
-        <div className={`flex gap-3 mb-6 transition-all duration-700 delay-100 ${visible ? "opacity-100" : "opacity-0"}`}>
-          <button
-            onClick={() => setFiltroPendentes(false)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${!filtroPendentes ? "bg-violet-500/20 border-violet-500/40 text-violet-300" : "border-white/10 text-muted-foreground hover:text-white"}`}
-          >
+        <div className={`flex gap-3 mb-6 transition-all duration-700 delay-150 ${visible ? "opacity-100" : "opacity-0"}`}>
+          <button onClick={() => setFiltroPendentes(false)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${!filtroPendentes ? "bg-violet-500/20 border-violet-500/40 text-violet-300" : "border-white/10 text-muted-foreground hover:text-white"}`}>
             Todos
           </button>
-          <button
-            onClick={() => setFiltroPendentes(true)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border flex items-center gap-2 ${filtroPendentes ? "bg-yellow-500/20 border-yellow-500/40 text-yellow-300" : "border-white/10 text-muted-foreground hover:text-white"}`}
-          >
+          <button onClick={() => setFiltroPendentes(true)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border flex items-center gap-2 ${filtroPendentes ? "bg-yellow-500/20 border-yellow-500/40 text-yellow-300" : "border-white/10 text-muted-foreground hover:text-white"}`}>
             Pendentes
             {totalPendentes > 0 && (
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-yellow-500/30 text-yellow-400 text-[10px] font-bold">
@@ -369,77 +468,109 @@ const Flashcards = () => {
           </button>
         </div>
 
-        {/* Groups Grid */}
-        <div className="grid gap-4 md:grid-cols-2">
-          {grupos.map((grupo, idx) => {
-            const hasPendentes = grupo.pendentes > 0;
+        {/* Grupos por material */}
+        <div className="space-y-8">
+          {materiaisUnicos.map((materialId) => {
+            const gruposMaterial = grupos.filter((g) => g.materialId === materialId);
+            const materialTitulo = gruposMaterial[0]?.materialTitulo || "Sem material";
+            const totalPendentesMaterial = gruposMaterial.reduce((a, g) => a + g.pendentes, 0);
+
             return (
-              <div
-                key={grupo.assuntoId}
-                className="group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/40 cursor-pointer transition-all duration-300 card-hover opacity-0 animate-fade-in-up"
-                style={{ animationDelay: `${idx * 80}ms`, animationFillMode: "forwards" }}
-                onClick={() => setAssuntoSelecionado(grupo)}
-              >
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(99,102,241,0.04))" }} />
-                <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-600 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                <div className="relative p-6">
-                  <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0"
-                        style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
-                        🃏
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>
-                          {grupo.assuntoTitulo}
-                        </h3>
-                        {grupo.materialTitulo && (
-                          <p className="text-[11px] text-muted-foreground mt-0.5">{grupo.materialTitulo}</p>
-                        )}
-                      </div>
-                    </div>
-                    {hasPendentes && (
-                      <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-xs font-bold animate-pulse">
-                        {grupo.pendentes}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-3">
-                      <div className="text-center">
-                        <p className="text-lg font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>{grupo.total}</p>
-                        <p className="text-[10px] text-muted-foreground">Total</p>
-                      </div>
-                      <div className="w-px bg-white/10" />
-                      <div className="text-center">
-                        <p className="text-lg font-bold" style={{ color: hasPendentes ? "#fbbf24" : "#34d399", fontFamily: "Syne, sans-serif" }}>
-                          {grupo.pendentes}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">Pendentes</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 text-violet-400">
-                      <span className="text-xs font-medium">
-                        {hasPendentes ? "Revisar" : "Ver todos"}
-                      </span>
-                      <svg className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              <div key={materialId}>
+                {/* Header do material */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/20 flex items-center justify-center text-sm">📖</div>
+                  <h2 className="text-sm font-bold text-white truncate" style={{ fontFamily: "Syne, sans-serif" }}>
+                    {materialTitulo}
+                  </h2>
+                  {totalPendentesMaterial > 0 && (
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-yellow-500/15 border border-yellow-500/25 text-yellow-400 text-[10px] font-bold">
+                      {totalPendentesMaterial} pendente{totalPendentesMaterial !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {/* Link para ver flashcards panorâmico */}
+                  {materialId && (
+                    <button
+                      onClick={() => navigate(`/flashcards/material/${materialId}`)}
+                      className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-violet-400 transition-colors"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16" />
                       </svg>
-                    </div>
-                  </div>
+                      Ver todos
+                    </button>
+                  )}
+                </div>
 
-                  {/* Progress bar */}
-                  <div className="mt-4 h-1 bg-white/5 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-700"
-                      style={{
-                        width: `${grupo.total > 0 ? ((grupo.total - grupo.pendentes) / grupo.total) * 100 : 0}%`,
-                        background: hasPendentes ? "linear-gradient(90deg,#fbbf24,#f59e0b)" : "linear-gradient(90deg,#34d399,#10b981)",
-                      }} />
-                  </div>
+                {/* Grid dos assuntos */}
+                <div className="grid gap-3 md:grid-cols-2">
+                  {gruposMaterial.map((grupo, idx) => {
+                    const hasPendentes = grupo.pendentes > 0;
+                    return (
+                      <div
+                        key={grupo.chave}
+                        className="group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/40 cursor-pointer transition-all duration-300 card-hover opacity-0 animate-fade-in-up"
+                        style={{ animationDelay: `${idx * 60}ms`, animationFillMode: "forwards" }}
+                        onClick={() => setGrupoSelecionado(grupo)}
+                      >
+                        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                          style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.08), rgba(99,102,241,0.04))" }} />
+                        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-600 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                        <div className="relative p-5">
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0"
+                                style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
+                                🃏
+                              </div>
+                              <div>
+                                <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>
+                                  {grupo.assuntoTitulo}
+                                </h3>
+                              </div>
+                            </div>
+                            {hasPendentes && (
+                              <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-xs font-bold animate-pulse">
+                                {grupo.pendentes}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex gap-3">
+                              <div className="text-center">
+                                <p className="text-lg font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>{grupo.total}</p>
+                                <p className="text-[10px] text-muted-foreground">Total</p>
+                              </div>
+                              <div className="w-px bg-white/10" />
+                              <div className="text-center">
+                                <p className="text-lg font-bold" style={{ color: hasPendentes ? "#fbbf24" : "#34d399", fontFamily: "Syne, sans-serif" }}>
+                                  {grupo.pendentes}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">Pendentes</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 text-violet-400">
+                              <span className="text-xs font-medium">{hasPendentes ? "Revisar" : "Ver todos"}</span>
+                              <svg className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          {/* Progress bar */}
+                          <div className="mt-3 h-1 bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-700"
+                              style={{
+                                width: `${grupo.total > 0 ? ((grupo.total - grupo.pendentes) / grupo.total) * 100 : 0}%`,
+                                background: hasPendentes ? "linear-gradient(90deg,#fbbf24,#f59e0b)" : "linear-gradient(90deg,#34d399,#10b981)",
+                              }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );

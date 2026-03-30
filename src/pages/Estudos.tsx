@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { buscarMateriaisDoUsuario, Material } from "../services/firebaseService";
+import { buscarMateriaisDoUsuario, excluirMaterial, Material } from "../services/firebaseService";
 import Navbar from "../components/Navbar";
 
 const Estudos = () => {
@@ -10,6 +10,8 @@ const Estudos = () => {
   const [materiais, setMateriais] = useState<Material[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [visible, setVisible] = useState(false);
+  const [excluindo, setExcluindo] = useState<string | null>(null);
+  const [confirmarExclusao, setConfirmarExclusao] = useState<string | null>(null);
 
   useEffect(() => {
     if (!usuario) return;
@@ -30,6 +32,24 @@ const Estudos = () => {
     if (!ts?.toDate) return "";
     const d = ts.toDate() as Date;
     return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  const handleExcluir = async (materialId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmarExclusao === materialId) {
+      setExcluindo(materialId);
+      try {
+        await excluirMaterial(materialId, usuario!.uid);
+        setMateriais((prev) => prev.filter((m) => m.id !== materialId));
+      } catch { /* silent */ }
+      finally {
+        setExcluindo(null);
+        setConfirmarExclusao(null);
+      }
+    } else {
+      setConfirmarExclusao(materialId);
+      setTimeout(() => setConfirmarExclusao(null), 3000);
+    }
   };
 
   if (carregando) {
@@ -112,21 +132,21 @@ const Estudos = () => {
             {materiais.map((material, idx) => (
               <div
                 key={material.id}
-                className={`group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/40 cursor-pointer transition-all duration-300 card-hover opacity-0 animate-fade-in-up`}
+                className={`group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/40 transition-all duration-300 card-hover opacity-0 animate-fade-in-up`}
                 style={{ animationDelay: `${idx * 80}ms`, animationFillMode: "forwards" }}
-                onClick={() => navigate(`/estudos/${material.id}`)}
               >
                 {/* Hover overlay */}
                 <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-400"
                   style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(99,102,241,0.04) 100%)" }} />
-
-                {/* Top accent line */}
                 <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-600 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
 
                 <div className="relative p-6">
                   {/* Header */}
                   <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3">
+                    <div
+                      className="flex items-center gap-3 flex-1 cursor-pointer"
+                      onClick={() => navigate(`/estudos/${material.id}`)}
+                    >
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600/30 to-indigo-500/20 border border-violet-500/20 flex items-center justify-center text-lg shrink-0">
                         📖
                       </div>
@@ -139,52 +159,73 @@ const Estudos = () => {
                         </p>
                       </div>
                     </div>
-                    <div className="shrink-0">
-                      <svg className="w-5 h-5 text-muted-foreground group-hover:text-violet-400 transition-colors group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
+
+                    {/* Botão excluir */}
+                    <button
+                      onClick={(e) => handleExcluir(material.id!, e)}
+                      disabled={excluindo === material.id}
+                      className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                        confirmarExclusao === material.id
+                          ? "bg-red-500/20 border border-red-500/50 text-red-400"
+                          : "opacity-0 group-hover:opacity-100 bg-white/5 border border-white/10 text-muted-foreground hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400"
+                      }`}
+                      title={confirmarExclusao === material.id ? "Clique para confirmar" : "Excluir material"}
+                    >
+                      {excluindo === material.id ? (
+                        <div className="w-3 h-3 rounded-full border border-red-400/50 border-t-red-400 animate-spin" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      )}
+                      {confirmarExclusao === material.id ? "Confirmar?" : ""}
+                    </button>
                   </div>
 
                   {/* Assuntos */}
-                  {material.assuntos && material.assuntos.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-                        {material.assuntos.length} Assunto{material.assuntos.length > 1 ? "s" : ""}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {material.assuntos.slice(0, 3).map((assunto) => (
-                          <span
-                            key={assunto.id}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border"
-                            style={{
-                              background: "rgba(139,92,246,0.08)",
-                              borderColor: "rgba(139,92,246,0.2)",
-                              color: "#a78bfa",
-                            }}
-                          >
-                            <span className="w-1 h-1 rounded-full bg-violet-400 flex-shrink-0" />
-                            {assunto.titulo}
-                          </span>
-                        ))}
-                        {material.assuntos.length > 3 && (
-                          <span className="px-2.5 py-1 rounded-lg text-[11px] text-muted-foreground border border-white/10">
-                            +{material.assuntos.length - 3}
-                          </span>
-                        )}
+                  <div
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/estudos/${material.id}`)}
+                  >
+                    {material.assuntos && material.assuntos.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                          {material.assuntos.length} Assunto{material.assuntos.length > 1 ? "s" : ""}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {material.assuntos.slice(0, 3).map((assunto) => (
+                            <span
+                              key={assunto.id}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border"
+                              style={{
+                                background: "rgba(139,92,246,0.08)",
+                                borderColor: "rgba(139,92,246,0.2)",
+                                color: "#a78bfa",
+                              }}
+                            >
+                              <span className="w-1 h-1 rounded-full bg-violet-400 flex-shrink-0" />
+                              {assunto.titulo}
+                            </span>
+                          ))}
+                          {material.assuntos.length > 3 && (
+                            <span className="px-2.5 py-1 rounded-lg text-[11px] text-muted-foreground border border-white/10">
+                              +{material.assuntos.length - 3}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Footer */}
-                  <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
-                    <span className="text-[11px] text-muted-foreground">
-                      Clique para estudar
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] px-2 py-1 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/15 font-medium">
-                        IA Ready
+                    {/* Footer */}
+                    <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
+                      <span className="text-[11px] text-muted-foreground">
+                        Clique para estudar
                       </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] px-2 py-1 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/15 font-medium">
+                          IA Ready
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>

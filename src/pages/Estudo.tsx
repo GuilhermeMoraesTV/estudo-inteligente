@@ -1,10 +1,9 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import {
   buscarMaterialPorId, buscarQuestoesPorAssunto,
   salvarQuestoes, salvarFlashcards, registrarResposta,
-  gerarReforcoParaQuestao as _unused,
   Material, Questao, AssuntoSalvo
 } from "../services/firebaseService";
 import { gerarConteudoParaAssunto, gerarFeedbackDesempenho, gerarReforcoParaQuestao } from "../services/aiService";
@@ -12,126 +11,187 @@ import Navbar from "../components/Navbar";
 
 type TipoEstudo = "simples" | "elaborada";
 
+// ---- Toast flutuante ----
+const ToastFlashcard = ({ visivel, onClose }: { visivel: boolean; onClose: () => void }) => {
+  useEffect(() => {
+    if (visivel) {
+      const t = setTimeout(onClose, 4000);
+      return () => clearTimeout(t);
+    }
+  }, [visivel, onClose]);
+
+  if (!visivel) return null;
+
+  return (
+    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] animate-fade-in-down">
+      <div
+        className="flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl"
+        style={{
+          background: "rgba(20, 18, 40, 0.95)",
+          border: "1px solid rgba(139, 92, 246, 0.4)",
+          backdropFilter: "blur(20px)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 30px rgba(139,92,246,0.15)",
+        }}
+      >
+        <div className="flex gap-1">
+          <div className="ai-loading-dot" style={{ background: "#a78bfa" }} />
+          <div className="ai-loading-dot" style={{ background: "#a78bfa" }} />
+          <div className="ai-loading-dot" style={{ background: "#a78bfa" }} />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
+            IA criando flashcards...
+          </p>
+          <p className="text-xs text-muted-foreground">Serão adicionados à sua coleção</p>
+        </div>
+        <button onClick={onClose} className="ml-2 text-muted-foreground hover:text-white transition-colors">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ---- Explicação formatada ----
+const ExplicacaoFormatada = ({ texto, tipo }: { texto: string; tipo: TipoEstudo }) => {
+  if (tipo === "elaborada") {
+    // Renderiza com formatação para modo concurso
+    const linhas = texto.split("\n").filter(Boolean);
+    return (
+      <div className="space-y-2">
+        {linhas.map((linha, i) => {
+          const isCorreta = linha.startsWith("✅");
+          const isErrada = linha.startsWith("❌");
+          const isConceito = linha.startsWith("📌");
+          const isDica = linha.startsWith("💡");
+
+          return (
+            <div
+              key={i}
+              className={`flex items-start gap-2 px-3 py-2 rounded-xl text-sm leading-relaxed ${
+                isCorreta ? "bg-success/10 border border-success/20" :
+                isErrada ? "bg-white/3 border border-white/5" :
+                isConceito ? "bg-violet-500/10 border border-violet-500/20" :
+                isDica ? "bg-yellow-500/10 border border-yellow-500/20" :
+                "text-white/80"
+              }`}
+            >
+              <span className="text-base leading-none mt-0.5 shrink-0">
+                {isCorreta ? "✅" : isErrada ? "❌" : isConceito ? "📌" : isDica ? "💡" : ""}
+              </span>
+              <span className={`${
+                isCorreta ? "text-success font-medium" :
+                isErrada ? "text-white/60" :
+                isConceito ? "text-violet-300 font-medium" :
+                isDica ? "text-yellow-300" :
+                "text-white/80"
+              }`}>
+                {linha.replace(/^[✅❌📌💡]\s*/, "")}
+              </span>
+            </div>
+          );
+        })}
+        {linhas.length === 1 && (
+          <p className="text-sm leading-relaxed text-white/80 px-1">{texto}</p>
+        )}
+      </div>
+    );
+  }
+
+  // Modo flash — renderiza conciso
+  const linhas = texto.split("\n").filter(Boolean);
+  return (
+    <div className="space-y-1.5">
+      {linhas.map((linha, i) => {
+        const isCorreta = linha.startsWith("✅");
+        const isConceito = linha.startsWith("📌");
+        const isDica = linha.startsWith("💡");
+        return (
+          <div key={i} className={`flex items-start gap-2 text-sm ${
+            isCorreta ? "text-success font-medium" :
+            isConceito ? "text-violet-300" :
+            isDica ? "text-yellow-300" :
+            "text-white/80"
+          }`}>
+            {(isCorreta || isConceito || isDica) && (
+              <span className="shrink-0">{isCorreta ? "✅" : isConceito ? "📌" : "💡"}</span>
+            )}
+            <span>{linha.replace(/^[✅📌💡]\s*/, "")}</span>
+          </div>
+        );
+      })}
+      {linhas.length === 0 && <p className="text-sm text-white/80">{texto}</p>}
+    </div>
+  );
+};
+
 // ---- Tela de seleção de tipo ----
 const SelecaoTipo = ({
-  assunto,
-  material,
-  onEscolher,
-  assuntos,
-  assuntoAtual,
-  onTrocarAssunto,
+  assunto, material, onEscolher, assuntos, assuntoAtual, onTrocarAssunto,
 }: {
-  assunto: AssuntoSalvo;
-  material: Material;
-  onEscolher: (tipo: TipoEstudo) => void;
-  assuntos: AssuntoSalvo[];
-  assuntoAtual: string;
-  onTrocarAssunto: (id: string) => void;
+  assunto: AssuntoSalvo; material: Material; onEscolher: (tipo: TipoEstudo) => void;
+  assuntos: AssuntoSalvo[]; assuntoAtual: string; onTrocarAssunto: (id: string) => void;
 }) => (
   <div className="min-h-screen bg-background">
     <div className="fixed inset-0 grid-pattern opacity-20 pointer-events-none" />
     <Navbar />
     <main className="relative mx-auto max-w-2xl px-4 pt-24 pb-16">
-      {/* Breadcrumb */}
       <div className="mb-6">
-        <button
-          onClick={() => window.history.back()}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-white transition-colors"
-        >
+        <button onClick={() => window.history.back()} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-white transition-colors">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
           {material.titulo}
         </button>
       </div>
-
-      {/* Assunto atual */}
       <div className="mb-8 animate-fade-in-up">
         <span className="text-xs text-violet-400 uppercase tracking-widest font-medium">Assunto</span>
-        <h1 className="text-3xl font-bold text-white mt-1" style={{ fontFamily: "Syne, sans-serif" }}>
-          {assunto.titulo}
-        </h1>
+        <h1 className="text-3xl font-bold text-white mt-1" style={{ fontFamily: "Syne, sans-serif" }}>{assunto.titulo}</h1>
         <p className="text-muted-foreground text-sm mt-2">{assunto.descricao}</p>
       </div>
-
-      {/* Outros assuntos */}
       {assuntos.length > 1 && (
         <div className="mb-8 animate-fade-in-up" style={{ animationDelay: "100ms" }}>
           <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Outros assuntos disponíveis</p>
           <div className="flex flex-wrap gap-2">
             {assuntos.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => onTrocarAssunto(a.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${
-                  a.id === assuntoAtual
-                    ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
-                    : "border-white/10 text-muted-foreground hover:border-violet-500/30 hover:text-white"
-                }`}
-              >
+              <button key={a.id} onClick={() => onTrocarAssunto(a.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${a.id === assuntoAtual ? "bg-violet-500/20 border-violet-500/50 text-violet-300" : "border-white/10 text-muted-foreground hover:border-violet-500/30 hover:text-white"}`}>
                 {a.titulo}
               </button>
             ))}
           </div>
         </div>
       )}
-
-      {/* Tipo de estudo */}
       <div className="animate-fade-in-up" style={{ animationDelay: "200ms" }}>
         <p className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Escolha o modo de estudo</p>
         <div className="grid grid-cols-2 gap-4">
-          {/* Flash */}
-          <button
-            onClick={() => onEscolher("simples")}
+          <button onClick={() => onEscolher("simples")}
             className="group relative overflow-hidden rounded-2xl p-6 text-left border border-white/10 hover:border-blue-500/50 transition-all duration-300"
-            style={{ background: "rgba(255,255,255,0.02)" }}
-          >
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12), rgba(99,102,241,0.06))" }} />
+            style={{ background: "rgba(255,255,255,0.02)" }}>
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12), rgba(99,102,241,0.06))" }} />
             <div className="relative">
-              <div className="w-12 h-12 rounded-xl mb-4 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform"
-                style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.25)" }}>
-                ⚡
-              </div>
-              <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>
-                Questão Flash
-              </h3>
-              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                Questões simples e diretas para memorização rápida de conceitos.
-              </p>
+              <div className="w-12 h-12 rounded-xl mb-4 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform" style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.25)" }}>⚡</div>
+              <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>Questão Flash</h3>
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">Questões simples e diretas para memorização rápida de conceitos.</p>
               <div className="mt-4 flex items-center gap-1 text-blue-400">
                 <span className="text-[11px] font-medium">Memorização</span>
-                <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+                <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
               </div>
             </div>
           </button>
-
-          {/* Elaborada */}
-          <button
-            onClick={() => onEscolher("elaborada")}
+          <button onClick={() => onEscolher("elaborada")}
             className="group relative overflow-hidden rounded-2xl p-6 text-left border border-white/10 hover:border-violet-500/50 transition-all duration-300"
-            style={{ background: "rgba(255,255,255,0.02)" }}
-          >
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(99,102,241,0.06))" }} />
+            style={{ background: "rgba(255,255,255,0.02)" }}>
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(99,102,241,0.06))" }} />
             <div className="relative">
-              <div className="w-12 h-12 rounded-xl mb-4 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform"
-                style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
-                🎯
-              </div>
-              <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>
-                Questão de Concurso
-              </h3>
-              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                Questões elaboradas no estilo CESPE/FCC com situações-problema.
-              </p>
+              <div className="w-12 h-12 rounded-xl mb-4 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform" style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>🎯</div>
+              <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>Questão de Concurso</h3>
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">Questões elaboradas no estilo CESPE/FCC com situações-problema.</p>
               <div className="mt-4 flex items-center gap-1 text-violet-400">
                 <span className="text-[11px] font-medium">Aprofundamento</span>
-                <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+                <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
               </div>
             </div>
           </button>
@@ -158,9 +218,7 @@ const LoadingQuestoes = ({ mensagem }: { mensagem: string }) => (
 );
 
 // ---- Option Button ----
-const OptionButton = ({
-  alternativa, index, respondida, selecionada, correta, onSelect,
-}: {
+const OptionButton = ({ alternativa, index, respondida, selecionada, correta, onSelect }: {
   alternativa: string; index: number; respondida: boolean;
   selecionada: string | null; correta: string; onSelect: (alt: string) => void;
 }) => {
@@ -188,11 +246,8 @@ const OptionButton = ({
       className={`question-option w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border transition-all text-left ${statusClass} ${borderClass} ${respondida ? "cursor-default" : ""} animate-fade-in-up opacity-0`}
       style={{ animationDelay: `${index * 60}ms`, animationFillMode: "forwards" }}
     >
-      <span className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${letterClass}`}>
-        {letter}
-      </span>
-      <span className="text-sm leading-snug flex-1"
-        style={{ color: respondida && isCorrect ? "#34d399" : respondida && isSelected ? "#f87171" : undefined }}>
+      <span className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${letterClass}`}>{letter}</span>
+      <span className="text-sm leading-snug flex-1" style={{ color: respondida && isCorrect ? "#34d399" : respondida && isSelected ? "#f87171" : undefined }}>
         {alternativa}
       </span>
       {respondida && isCorrect && (
@@ -210,11 +265,8 @@ const OptionButton = ({
 };
 
 // ---- Resultado ----
-const ResultScreen = ({
-  acertos, total, navigate, materialId, assuntoId,
-}: {
-  acertos: number; total: number;
-  navigate: (p: string) => void; materialId: string; assuntoId: string;
+const ResultScreen = ({ acertos, total, navigate, materialId, assuntoId }: {
+  acertos: number; total: number; navigate: (p: string) => void; materialId: string; assuntoId: string;
 }) => {
   const taxa = total > 0 ? Math.round((acertos / total) * 100) : 0;
   const [feedback, setFeedback] = useState("");
@@ -253,14 +305,10 @@ const ResultScreen = ({
               <span className="text-xs text-muted-foreground">de acerto</span>
             </div>
           </div>
-
           <div className="text-center">
             <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>Sessão Concluída!</h1>
-            <p className="text-muted-foreground mt-2 text-sm">
-              {taxa >= 70 ? "Excelente! 🎉" : taxa >= 40 ? "Bom progresso! 💪" : "Continue praticando! 🔥"}
-            </p>
+            <p className="text-muted-foreground mt-2 text-sm">{taxa >= 70 ? "Excelente! 🎉" : taxa >= 40 ? "Bom progresso! 💪" : "Continue praticando! 🔥"}</p>
           </div>
-
           <div className="grid grid-cols-3 gap-4 w-full">
             {[
               { label: "Acertos", value: acertos, color: "#34d399", icon: "✅" },
@@ -275,27 +323,20 @@ const ResultScreen = ({
               </div>
             ))}
           </div>
-
-          <div className="w-full glass rounded-2xl p-5 border border-violet-500/20 animate-fade-in-up opacity-0"
-            style={{ animationDelay: "400ms", animationFillMode: "forwards" }}>
+          <div className="w-full glass rounded-2xl p-5 border border-violet-500/20 animate-fade-in-up opacity-0" style={{ animationDelay: "400ms", animationFillMode: "forwards" }}>
             <div className="flex items-center gap-2 mb-2">
               <div className="w-6 h-6 rounded-lg bg-violet-500/20 flex items-center justify-center text-xs">🧠</div>
               <span className="text-xs font-semibold text-violet-400">Feedback da IA</span>
             </div>
-            <p className="text-sm text-white/80 leading-relaxed">
-              {feedbackLoading ? "Analisando desempenho..." : feedback}
-            </p>
+            <p className="text-sm text-white/80 leading-relaxed">{feedbackLoading ? "Analisando desempenho..." : feedback}</p>
           </div>
-
           <div className="flex gap-3 w-full">
             <button onClick={() => navigate(`/estudos/${materialId}`)}
               className="flex-1 glass rounded-2xl py-3 text-sm font-semibold text-white border border-white/10 hover:bg-white/5 transition-all">
               ← Assuntos
             </button>
-            <button
-              onClick={() => navigate(`/estudo/${materialId}/${assuntoId}`)}
-              className="flex-1 btn-primary rounded-2xl py-3 text-sm font-bold text-white"
-              style={{ fontFamily: "Syne, sans-serif" }}>
+            <button onClick={() => navigate(`/estudo/${materialId}/${assuntoId}`)}
+              className="flex-1 btn-primary rounded-2xl py-3 text-sm font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
               🔄 Tentar Novamente
             </button>
           </div>
@@ -329,9 +370,9 @@ const Estudo = () => {
   const [acertos, setAcertos] = useState(0);
   const [totalRespondidas, setTotalRespondidas] = useState(0);
   const [gerandoReforco, setGerandoReforco] = useState(false);
+  const [showToastFlashcard, setShowToastFlashcard] = useState(false);
   const tempoInicio = useRef<number>(Date.now());
 
-  // Carregar material
   useEffect(() => {
     if (!materialId) return;
     buscarMaterialPorId(materialId).then((m) => {
@@ -344,7 +385,6 @@ const Estudo = () => {
     });
   }, [materialId, assuntoId]);
 
-  // Trocar assunto
   const handleTrocarAssunto = (id: string) => {
     if (!material) return;
     navigate(`/estudo/${materialId}/${id}`, { replace: true });
@@ -356,32 +396,26 @@ const Estudo = () => {
     setIndiceAtual(0);
   };
 
-  // Gerar questões ao escolher tipo
   const handleEscolherTipo = async (tipo: TipoEstudo) => {
     if (!usuario || !assuntoAtual || !materialId) return;
     setTipoEstudo(tipo);
     setGerandoQuestoes(true);
 
     try {
-      // Tenta buscar questões salvas do mesmo tipo
       const salvas = await buscarQuestoesPorAssunto(usuario.uid, materialId, assuntoAtual.id);
       const doTipo = salvas.filter((q) => q.tipo === tipo);
 
       if (doTipo.length >= 3) {
-        // Usa questões salvas (embaralhadas)
         setQuestoes(doTipo.sort(() => Math.random() - 0.5).slice(0, 5));
       } else {
-        // Gera novas
         const resposta = await gerarConteudoParaAssunto(assuntoAtual, tipo, 5);
         const ids = await salvarQuestoes(
-          usuario.uid, materialId, assuntoAtual.id, assuntoAtual.titulo,
-          resposta.questoes
+          usuario.uid, materialId, assuntoAtual.id, assuntoAtual.titulo, resposta.questoes
         );
         await salvarFlashcards(
           usuario.uid, materialId, assuntoAtual.id, assuntoAtual.titulo,
           resposta.flashcards, "gerado", material?.titulo
         );
-
         const novas: Questao[] = resposta.questoes.map((q, i) => ({
           id: ids[i], userId: usuario.uid, materialId: materialId!,
           assuntoId: assuntoAtual.id, assuntoTitulo: assuntoAtual.titulo,
@@ -417,7 +451,6 @@ const Estudo = () => {
       pergunta: questaoAtual.pergunta,
     });
 
-    // Se errou, salvar flashcard de reforço
     if (!acertou) {
       await salvarFlashcards(
         usuario.uid, materialId!, questaoAtual.assuntoId, questaoAtual.assuntoTitulo,
@@ -430,12 +463,12 @@ const Estudo = () => {
   const handleGerarReforco = async () => {
     if (!usuario || !assuntoAtual || !materialId || !questoes[indiceAtual]) return;
     setGerandoReforco(true);
+    setShowToastFlashcard(true);
     try {
       const q = questoes[indiceAtual];
       const reforco = await gerarReforcoParaQuestao(q.pergunta, q.assuntoTitulo);
       await salvarQuestoes(usuario.uid, materialId, q.assuntoId, q.assuntoTitulo, reforco.questoes);
-      await salvarFlashcards(usuario.uid, materialId, q.assuntoId, q.assuntoTitulo, reforco.flashcards, "erro", material?.titulo);
-      alert(`✅ ${reforco.questoes.length} questões e ${reforco.flashcards.length} flashcards de reforço gerados!`);
+      await salvarFlashcards(usuario.uid, materialId, q.assuntoId, q.assuntoTitulo, reforco.flashcards, "gerado", material?.titulo);
     } catch { /* silent */ }
     finally { setGerandoReforco(false); }
   };
@@ -468,11 +501,8 @@ const Estudo = () => {
   if (!tipoEstudo) {
     return (
       <SelecaoTipo
-        assunto={assuntoAtual}
-        material={material}
-        onEscolher={handleEscolherTipo}
-        assuntos={material.assuntos || []}
-        assuntoAtual={assuntoAtual.id}
+        assunto={assuntoAtual} material={material} onEscolher={handleEscolherTipo}
+        assuntos={material.assuntos || []} assuntoAtual={assuntoAtual.id}
         onTrocarAssunto={handleTrocarAssunto}
       />
     );
@@ -495,70 +525,64 @@ const Estudo = () => {
       <div className="fixed inset-0 grid-pattern opacity-15 pointer-events-none" />
       <Navbar />
 
+      <ToastFlashcard
+        visivel={showToastFlashcard}
+        onClose={() => setShowToastFlashcard(false)}
+      />
+
       <main className="relative mx-auto max-w-2xl px-4 pt-24 pb-16">
         {/* Top bar */}
         <div className="mb-6 animate-fade-in-down">
-          {/* Assuntos switcher */}
           {(material.assuntos?.length || 0) > 1 && (
             <div className="flex gap-2 flex-wrap mb-4">
               {material.assuntos?.map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => handleTrocarAssunto(a.id)}
-                  className={`px-3 py-1 rounded-xl text-xs font-medium transition-all border ${
-                    a.id === assuntoAtual.id
-                      ? "bg-violet-500/20 border-violet-500/40 text-violet-300"
-                      : "border-white/10 text-muted-foreground hover:border-violet-500/30 hover:text-white"
-                  }`}
-                >
+                <button key={a.id} onClick={() => handleTrocarAssunto(a.id)}
+                  className={`px-3 py-1 rounded-xl text-xs font-medium transition-all border ${a.id === assuntoAtual.id ? "bg-violet-500/20 border-violet-500/40 text-violet-300" : "border-white/10 text-muted-foreground hover:border-violet-500/30 hover:text-white"}`}>
                   {a.titulo}
                 </button>
               ))}
             </div>
           )}
-
           <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
             <div className="flex items-center gap-3">
-              <span className="glass rounded-lg px-3 py-1 text-violet-400 font-mono font-bold">
-                {indiceAtual + 1}/{questoes.length}
-              </span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] border ${
-                tipoEstudo === "simples"
-                  ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                  : "bg-violet-500/10 border-violet-500/20 text-violet-400"
-              }`}>
+              <span className="glass rounded-lg px-3 py-1 text-violet-400 font-mono font-bold">{indiceAtual + 1}/{questoes.length}</span>
+              <span className={`px-2 py-0.5 rounded-md text-[10px] border ${tipoEstudo === "simples" ? "bg-blue-500/10 border-blue-500/20 text-blue-400" : "bg-violet-500/10 border-violet-500/20 text-violet-400"}`}>
                 {tipoEstudo === "simples" ? "⚡ Flash" : "🎯 Concurso"}
               </span>
             </div>
             <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <span className="text-success">✓</span>
-                <span className="text-success font-semibold">{acertos}</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="text-destructive">✗</span>
-                <span className="text-destructive font-semibold">{totalRespondidas - acertos}</span>
-              </span>
+              <span className="flex items-center gap-1"><span className="text-success">✓</span><span className="text-success font-semibold">{acertos}</span></span>
+              <span className="flex items-center gap-1"><span className="text-destructive">✗</span><span className="text-destructive font-semibold">{totalRespondidas - acertos}</span></span>
             </div>
           </div>
           <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
             <div className="h-full rounded-full transition-all duration-700"
-              style={{
-                width: `${progPercent}%`,
-                background: "linear-gradient(90deg, #7c3aed, #6366f1, #60a5fa)",
-                boxShadow: "0 0 10px rgba(139,92,246,0.5)",
-              }} />
+              style={{ width: `${progPercent}%`, background: "linear-gradient(90deg, #7c3aed, #6366f1, #60a5fa)", boxShadow: "0 0 10px rgba(139,92,246,0.5)" }} />
           </div>
         </div>
 
         {/* Question */}
-        <div key={`${assuntoAtual.id}-${indiceAtual}`} className="glass-strong rounded-3xl p-7 mb-5 animate-scale-in"
-          style={{ border: "1px solid rgba(139,92,246,0.15)" }}>
-          <div className="flex items-center gap-2 mb-4">
+        <div key={`${assuntoAtual.id}-${indiceAtual}`} className="glass-strong rounded-3xl p-7 mb-5 animate-scale-in" style={{ border: "1px solid rgba(139,92,246,0.15)" }}>
+          <div className="flex items-center justify-between mb-4">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-500/15 border border-violet-500/25 text-violet-400 text-xs font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
               {assuntoAtual.titulo} · Questão {indiceAtual + 1}
             </span>
+            {/* Botão Revisar junto ao card */}
+            <button
+              onClick={handleGerarReforco}
+              disabled={gerandoReforco}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border border-yellow-500/20 bg-yellow-500/8 text-yellow-500/70 hover:border-yellow-500/40 hover:text-yellow-400 hover:bg-yellow-500/15 disabled:opacity-40"
+            >
+              {gerandoReforco ? (
+                <div className="w-3 h-3 rounded-full border border-yellow-400/50 border-t-yellow-400 animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              )}
+              Revisar
+            </button>
           </div>
 
           <h2 className="text-base leading-relaxed text-white/95 font-medium mb-6" style={{ lineHeight: "1.7" }}>
@@ -576,30 +600,16 @@ const Estudo = () => {
           </div>
         </div>
 
-        {/* Explanation + Reforço */}
+        {/* Explanation formatada */}
         {respondida && showExplanation && (
           <div className="glass rounded-2xl p-5 mb-5 animate-fade-in-up border border-violet-500/15">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-violet-500/20 flex items-center justify-center text-xs">💡</div>
-                <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider">Explicação</span>
-              </div>
-              <button
-                onClick={handleGerarReforco}
-                disabled={gerandoReforco}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:border-yellow-500/50 disabled:opacity-50"
-              >
-                {gerandoReforco ? (
-                  <>
-                    <div className="w-3 h-3 rounded-full border border-yellow-400/50 border-t-yellow-400 animate-spin" />
-                    Gerando...
-                  </>
-                ) : (
-                  <>📌 Revisar</>
-                )}
-              </button>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 rounded-lg bg-violet-500/20 flex items-center justify-center text-xs">💡</div>
+              <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider">
+                {tipoEstudo === "elaborada" ? "Análise detalhada" : "Explicação"}
+              </span>
             </div>
-            <p className="text-sm leading-relaxed text-white/80">{questaoAtual?.explicacao}</p>
+            <ExplicacaoFormatada texto={questaoAtual?.explicacao || ""} tipo={tipoEstudo} />
           </div>
         )}
 

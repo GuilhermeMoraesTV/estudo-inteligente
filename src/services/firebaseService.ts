@@ -24,11 +24,12 @@ export interface PerfilUsuario {
   email: string;
   nome: string;
   criadoEm: Timestamp;
+  modoRevisao?: "espacada" | "diaria"; // SM-2 ou revisão diária
 }
 
 export const criarPerfilUsuario = async (uid: string, email: string, nome: string) => {
   await setDoc(doc(db, "users", uid), {
-    uid, email, nome, criadoEm: Timestamp.now(),
+    uid, email, nome, criadoEm: Timestamp.now(), modoRevisao: "espacada",
   });
 };
 
@@ -38,15 +39,19 @@ export const buscarPerfilUsuario = async (uid: string): Promise<PerfilUsuario | 
   return docSnap.exists() ? (docSnap.data() as PerfilUsuario) : null;
 };
 
+export const atualizarModoRevisao = async (uid: string, modo: "espacada" | "diaria") => {
+  await updateDoc(doc(db, "users", uid), { modoRevisao: modo });
+};
+
 // ==================== MATERIAIS ====================
 
 export interface Material {
   id?: string;
   userId: string;
-  titulo: string;          // título geral
+  titulo: string;
   textoOriginal: string;
   resumo: string;
-  assuntos: AssuntoSalvo[]; // assuntos identificados pela IA
+  assuntos: AssuntoSalvo[];
   criadoEm: Timestamp;
 }
 
@@ -86,13 +91,40 @@ export const buscarMaterialPorId = async (materialId: string): Promise<Material 
   return docSnap.exists() ? ({ id: docSnap.id, ...docSnap.data() } as Material) : null;
 };
 
+export const excluirMaterial = async (materialId: string, userId: string): Promise<void> => {
+  // Exclui o material
+  await deleteDoc(doc(db, "materiais", materialId));
+
+  // Exclui questões associadas
+  const qQuestoes = query(
+    collection(db, "questoes"),
+    where("userId", "==", userId),
+    where("materialId", "==", materialId)
+  );
+  const snapQuestoes = await getDocs(qQuestoes);
+  for (const d of snapQuestoes.docs) {
+    await deleteDoc(d.ref);
+  }
+
+  // Exclui flashcards associados
+  const qFlash = query(
+    collection(db, "flashcards"),
+    where("userId", "==", userId),
+    where("materialId", "==", materialId)
+  );
+  const snapFlash = await getDocs(qFlash);
+  for (const d of snapFlash.docs) {
+    await deleteDoc(d.ref);
+  }
+};
+
 // ==================== QUESTÕES ====================
 
 export interface Questao {
   id?: string;
   userId: string;
   materialId: string;
-  assuntoId: string;       // qual assunto essa questão pertence
+  assuntoId: string;
   assuntoTitulo: string;
   pergunta: string;
   alternativas: string[];
@@ -165,12 +197,12 @@ export interface Flashcard {
   id?: string;
   userId: string;
   materialId: string;
+  materialTitulo?: string;
   assuntoId: string;
   assuntoTitulo: string;
-  materialTitulo?: string;
   frente: string;
   verso: string;
-  origem: "gerado" | "erro"; // se veio de questão errada ou gerado automaticamente
+  origem: "gerado" | "erro";
   proximaRevisao: Timestamp;
   intervalo: number;
   facilidade: number;
@@ -191,7 +223,8 @@ export const salvarFlashcards = async (
   const agora = Timestamp.now();
   for (const fc of flashcards) {
     const docRef = await addDoc(collection(db, "flashcards"), {
-      userId, materialId, assuntoId, assuntoTitulo, materialTitulo: materialTitulo || "",
+      userId, materialId, assuntoId, assuntoTitulo,
+      materialTitulo: materialTitulo || "",
       frente: fc.frente, verso: fc.verso, origem,
       proximaRevisao: agora, intervalo: 1, facilidade: 2.5, repeticoes: 0,
       criadoEm: agora,
@@ -230,7 +263,27 @@ export const buscarTodosFlashcardsDoUsuario = async (userId: string): Promise<Fl
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
 };
 
-export const atualizarFlashcard = async (flashcardId: string, qualidade: number) => {
+export const buscarFlashcardsPorMaterial = async (
+  userId: string,
+  materialId: string
+): Promise<Flashcard[]> => {
+  const q = query(
+    collection(db, "flashcards"),
+    where("userId", "==", userId),
+    where("materialId", "==", materialId)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs
+    .map((d) => ({ id: d.id, ...d.data() } as Flashcard))
+    .sort((a, b) => timestampToMillis(a.criadoEm) - timestampToMillis(b.criadoEm));
+};
+
+// SM-2 algorithm
+export const atualizarFlashcard = async (
+  flashcardId: string,
+  qualidade: number,
+  modoRevisao: "espacada" | "diaria" = "espacada"
+) => {
   const docRef = doc(db, "flashcards", flashcardId);
   const docSnap = await getDoc(docRef);
   if (!docSnap.exists()) return;
@@ -238,6 +291,18 @@ export const atualizarFlashcard = async (flashcardId: string, qualidade: number)
   const dados = docSnap.data() as Flashcard;
   let { intervalo, facilidade, repeticoes } = dados;
 
+  if (modoRevisao === "diaria") {
+    // Revisão diária: sempre agenda para amanhã
+    const proximaData = new Date();
+    proximaData.setDate(proximaData.getDate() + 1);
+    await updateDoc(docRef, {
+      intervalo: 1, facilidade, repeticoes: repeticoes + 1,
+      proximaRevisao: Timestamp.fromDate(proximaData),
+    });
+    return;
+  }
+
+  // SM-2 (espaçada)
   if (qualidade === 0) {
     intervalo = 1; repeticoes = 0; facilidade = Math.max(1.3, facilidade - 0.2);
   } else if (qualidade === 1) {
@@ -270,7 +335,7 @@ export interface HistoricoResposta {
   tempoGasto: number;
   assuntoId?: string;
   assuntoTitulo?: string;
-  pergunta?: string; // para gerar reforço depois
+  pergunta?: string;
   criadoEm: Timestamp;
 }
 
@@ -322,3 +387,6 @@ export const calcularEstatisticas = async (userId: string) => {
     ultimasRespostas: historico.slice(0, 10),
   };
 };
+
+// Alias para compatibilidade
+export const gerarReforcoParaQuestao = async () => ({ questoes: [], flashcards: [] });
