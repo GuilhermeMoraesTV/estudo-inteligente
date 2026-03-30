@@ -1,21 +1,17 @@
-// Serviço centralizado para chamadas à API do Google Gemini.
+// Serviço centralizado para chamadas à API da IA via Firebase.
 // Suporta busca na web para textos curtos e análise de assuntos.
+//
+// IMPORTANTE: Não instancie getGenerativeModel() aqui.
+// Importe sempre `geminiModel` do firebaseConfig — ele já usa GoogleAIBackend,
+// que roteia as chamadas pelo próprio Firebase sem expor a chave API ao cliente.
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
-
-if (!API_KEY) {
-  console.warn("⚠️ VITE_GEMINI_API_KEY não configurada.");
-}
-
-const genAI = new GoogleGenerativeAI(API_KEY || "");
+import { geminiModel } from "./firebaseConfig";
 
 export interface Assunto {
   id: string;
   titulo: string;
   descricao: string;
-  trecho: string; // trecho do texto original para gerar questões
+  trecho: string;
 }
 
 export interface RespostaMapaAssuntos {
@@ -37,37 +33,30 @@ export interface RespostaIA {
   flashcards: Array<{ frente: string; verso: string }>;
 }
 
+/**
+ * Limpa a resposta da IA e garante que seja um JSON válido.
+ */
 function extrairJSON(texto: string): string {
-  // Remove markdown code blocks
-  let limpo = texto.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
-
-  // Tenta encontrar o JSON válido
-  const inicioObj = limpo.indexOf("{");
-  const fimObj = limpo.lastIndexOf("}");
-  if (inicioObj !== -1 && fimObj !== -1) {
-    limpo = limpo.substring(inicioObj, fimObj + 1);
+  try {
+    let limpo = texto.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const inicioObj = limpo.indexOf("{");
+    const fimObj = limpo.lastIndexOf("}");
+    if (inicioObj !== -1 && fimObj !== -1) {
+      return limpo.substring(inicioObj, fimObj + 1);
+    }
+    return limpo;
+  } catch (e) {
+    return texto;
   }
-
-  return limpo;
-}
-
-function getModel(jsonMode = true) {
-  return genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: {
-      ...(jsonMode ? { responseMimeType: "application/json" } : {}),
-      temperature: 0.7,
-      maxOutputTokens: 8192,
-    },
-  });
 }
 
 /**
  * Mapeia assuntos de um texto/arquivo e gera título geral.
  */
-export const mapearAssuntos = async (texto: string, nomeArquivo?: string): Promise<RespostaMapaAssuntos> => {
-  const model = getModel(false);
-
+export const mapearAssuntos = async (
+  texto: string,
+  nomeArquivo?: string
+): Promise<RespostaMapaAssuntos> => {
   const prompt = `Você é um especialista em concursos públicos brasileiros. Analise o texto abaixo e identifique os assuntos/tópicos principais.
 
 ${nomeArquivo ? `Nome do arquivo: ${nomeArquivo}` : ""}
@@ -94,7 +83,7 @@ TEXTO:
 ${texto.substring(0, 6000)}`;
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await geminiModel.generateContent(prompt);
     const raw = result.response.text();
     const json = extrairJSON(raw);
     const dados: RespostaMapaAssuntos = JSON.parse(json);
@@ -105,13 +94,15 @@ ${texto.substring(0, 6000)}`;
 
     return dados;
   } catch (e) {
-    // Fallback: cria um assunto único
+    console.error("Erro no mapeamento da IA:", e);
     return {
-      tituloGeral: nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Material de Estudo",
+      tituloGeral:
+        nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Material de Estudo",
       assuntos: [
         {
           id: "assunto_1",
-          titulo: nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Conteúdo Principal",
+          titulo:
+            nomeArquivo?.replace(/\.(pdf|txt|docx?)$/i, "") || "Conteúdo Principal",
           descricao: "Conteúdo do material enviado",
           trecho: texto.substring(0, 3000),
         },
@@ -129,18 +120,13 @@ export const gerarConteudoParaAssunto = async (
   tipoQuestao: "simples" | "elaborada" = "elaborada",
   quantidadeQuestoes = 5
 ): Promise<RespostaIA> => {
-  if (!API_KEY) {
-    throw new Error("API Key do Gemini não configurada.");
-  }
-
-  const model = getModel(false);
-
   const textoBase = assunto.trecho.trim();
   const usarConhecimentoIA = textoBase.length < 200;
 
-  const instrucaoTipo = tipoQuestao === "simples"
-    ? "Gere questões SIMPLES de memorização (verdadeiro/falso em formato múltipla escolha, definições diretas, conceitos básicos). As alternativas devem ser curtas e objetivas."
-    : "Gere questões ELABORADAS no estilo CESPE/FCC/VUNESP (situações-problema, interpretação, aplicação de conceitos, pegadinhas técnicas). As alternativas devem ser completas e desafiadoras.";
+  const instrucaoTipo =
+    tipoQuestao === "simples"
+      ? "Gere questões SIMPLES de memorização (verdadeiro/falso em formato múltipla escolha, definições diretas, conceitos básicos). As alternativas devem ser curtas e objetivas."
+      : "Gere questões ELABORADAS no estilo CESPE/FCC/VUNESP (situações-problema, interpretação, aplicação de conceitos, pegadinhas técnicas). As alternativas devem ser completas e desafiadoras.";
 
   const fonteDados = usarConhecimentoIA
     ? `Use seu conhecimento sobre o assunto "${assunto.titulo}" para gerar questões de concurso público.`
@@ -178,7 +164,7 @@ Retorne APENAS este JSON válido (sem markdown):
 }`;
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await geminiModel.generateContent(prompt);
     const raw = result.response.text();
     const json = extrairJSON(raw);
     const dados: RespostaIA = JSON.parse(json);
@@ -189,10 +175,8 @@ Retorne APENAS este JSON válido (sem markdown):
 
     return dados;
   } catch (e) {
-    if (e instanceof SyntaxError) {
-      throw new Error("Erro ao processar resposta da IA. Tente novamente.");
-    }
-    throw e;
+    console.error("Erro ao gerar conteúdo:", e);
+    return { resumo: "Não foi possível gerar no momento.", questoes: [], flashcards: [] };
   }
 };
 
@@ -203,10 +187,6 @@ export const gerarReforcoParaQuestao = async (
   perguntaOriginal: string,
   assunto: string
 ): Promise<RespostaIA> => {
-  if (!API_KEY) throw new Error("API Key não configurada.");
-
-  const model = getModel(false);
-
   const prompt = `Você é professor de concursos públicos. O aluno errou a seguinte questão:
 
 "${perguntaOriginal}"
@@ -236,12 +216,12 @@ Retorne APENAS este JSON (sem markdown):
 }`;
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await geminiModel.generateContent(prompt);
     const raw = result.response.text();
     const json = extrairJSON(raw);
     return JSON.parse(json);
   } catch {
-    throw new Error("Erro ao gerar reforço. Tente novamente.");
+    return { resumo: "Erro de reforço", questoes: [], flashcards: [] };
   }
 };
 
@@ -252,16 +232,12 @@ export const gerarFeedbackDesempenho = async (
   taxaAcerto: number,
   temasErrados: string[]
 ): Promise<string> => {
-  if (!API_KEY) return "Configure a API Key para receber feedback personalizado.";
-
-  const model = getModel(false);
-
   const prompt = `Tutor de concursos públicos. O aluno teve ${taxaAcerto}% de acerto.
 ${temasErrados.length > 0 ? `Errou em: ${temasErrados.slice(0, 3).join(", ")}.` : "Acertou tudo."}
 Feedback breve, motivador e estratégico (máximo 2 frases). Seja direto.`;
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await geminiModel.generateContent(prompt);
     return result.response.text().trim();
   } catch {
     return "Continue praticando! A consistência é a chave para a aprovação.";
