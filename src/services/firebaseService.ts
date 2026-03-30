@@ -16,7 +16,7 @@ import { db } from "./firebaseConfig";
 
 const timestampToMillis = (valor?: Timestamp) => valor?.toMillis?.() ?? 0;
 
-// ==================== PERFIL DO USUÁRIO ====================
+// ==================== PERFIL ====================
 
 export interface PerfilUsuario {
   uid: string;
@@ -39,14 +39,7 @@ export const buscarPerfilUsuario = async (uid: string): Promise<PerfilUsuario | 
 };
 
 export const atualizarModoRevisao = async (uid: string, modo: "espacada" | "diaria") => {
-  const docRef = doc(db, "users", uid);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    await updateDoc(docRef, { modoRevisao: modo });
-  } else {
-    // Criar perfil básico se não existir
-    await setDoc(docRef, { uid, modoRevisao: modo, criadoEm: Timestamp.now() }, { merge: true });
-  }
+  await setDoc(doc(db, "users", uid), { modoRevisao: modo }, { merge: true });
 };
 
 // ==================== MATERIAIS ====================
@@ -97,37 +90,23 @@ export const buscarMaterialPorId = async (materialId: string): Promise<Material 
   return docSnap.exists() ? ({ id: docSnap.id, ...docSnap.data() } as Material) : null;
 };
 
-// CORRIGIDO: usa writeBatch para exclusão em lote de forma confiável
 export const excluirMaterial = async (materialId: string, userId: string): Promise<void> => {
-  // 1. Excluir o documento do material
   await deleteDoc(doc(db, "materiais", materialId));
 
-  // 2. Buscar e excluir questões associadas em lote
-  const qQuestoes = query(
-    collection(db, "questoes"),
-    where("userId", "==", userId),
-    where("materialId", "==", materialId)
-  );
+  const qQuestoes = query(collection(db, "questoes"), where("userId", "==", userId), where("materialId", "==", materialId));
   const snapQuestoes = await getDocs(qQuestoes);
-
   if (snapQuestoes.docs.length > 0) {
-    const batchQuestoes = writeBatch(db);
-    snapQuestoes.docs.forEach((d) => batchQuestoes.delete(d.ref));
-    await batchQuestoes.commit();
+    const b = writeBatch(db);
+    snapQuestoes.docs.forEach((d) => b.delete(d.ref));
+    await b.commit();
   }
 
-  // 3. Buscar e excluir flashcards associados em lote
-  const qFlash = query(
-    collection(db, "flashcards"),
-    where("userId", "==", userId),
-    where("materialId", "==", materialId)
-  );
+  const qFlash = query(collection(db, "flashcards"), where("userId", "==", userId), where("materialId", "==", materialId));
   const snapFlash = await getDocs(qFlash);
-
   if (snapFlash.docs.length > 0) {
-    const batchFlash = writeBatch(db);
-    snapFlash.docs.forEach((d) => batchFlash.delete(d.ref));
-    await batchFlash.commit();
+    const b = writeBatch(db);
+    snapFlash.docs.forEach((d) => b.delete(d.ref));
+    await b.commit();
   }
 };
 
@@ -164,12 +143,9 @@ export const salvarQuestoes = async (
   for (const q of questoes) {
     const docRef = await addDoc(collection(db, "questoes"), {
       userId, materialId, assuntoId, assuntoTitulo,
-      pergunta: q.pergunta,
-      alternativas: q.alternativas,
-      correta: q.correta,
-      explicacao: q.explicacao,
-      tipo: q.tipo || "elaborada",
-      criadoEm: Timestamp.now(),
+      pergunta: q.pergunta, alternativas: q.alternativas,
+      correta: q.correta, explicacao: q.explicacao,
+      tipo: q.tipo || "elaborada", criadoEm: Timestamp.now(),
     });
     ids.push(docRef.id);
   }
@@ -177,28 +153,13 @@ export const salvarQuestoes = async (
 };
 
 export const buscarQuestoesPorAssunto = async (
-  userId: string,
-  materialId: string,
-  assuntoId: string
+  userId: string, materialId: string, assuntoId: string
 ): Promise<Questao[]> => {
   const q = query(
     collection(db, "questoes"),
     where("userId", "==", userId),
     where("materialId", "==", materialId),
     where("assuntoId", "==", assuntoId)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Questao));
-};
-
-export const buscarQuestoesPorMaterial = async (
-  userId: string,
-  materialId: string
-): Promise<Questao[]> => {
-  const q = query(
-    collection(db, "questoes"),
-    where("userId", "==", userId),
-    where("materialId", "==", materialId)
   );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Questao));
@@ -257,19 +218,6 @@ export const buscarFlashcardsPendentes = async (userId: string): Promise<Flashca
     .sort((a, b) => timestampToMillis(a.proximaRevisao) - timestampToMillis(b.proximaRevisao));
 };
 
-export const buscarFlashcardsPorAssunto = async (
-  userId: string,
-  assuntoId: string
-): Promise<Flashcard[]> => {
-  const q = query(
-    collection(db, "flashcards"),
-    where("userId", "==", userId),
-    where("assuntoId", "==", assuntoId)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
-};
-
 export const buscarTodosFlashcardsDoUsuario = async (userId: string): Promise<Flashcard[]> => {
   const q = query(collection(db, "flashcards"), where("userId", "==", userId));
   const snapshot = await getDocs(q);
@@ -277,8 +225,7 @@ export const buscarTodosFlashcardsDoUsuario = async (userId: string): Promise<Fl
 };
 
 export const buscarFlashcardsPorMaterial = async (
-  userId: string,
-  materialId: string
+  userId: string, materialId: string
 ): Promise<Flashcard[]> => {
   const q = query(
     collection(db, "flashcards"),
@@ -291,7 +238,7 @@ export const buscarFlashcardsPorMaterial = async (
     .sort((a, b) => timestampToMillis(a.criadoEm) - timestampToMillis(b.criadoEm));
 };
 
-// SM-2 algorithm
+// SM-2 com suporte a modo diário
 export const atualizarFlashcard = async (
   flashcardId: string,
   qualidade: number,
@@ -305,12 +252,10 @@ export const atualizarFlashcard = async (
   let { intervalo, facilidade, repeticoes } = dados;
 
   if (modoRevisao === "diaria") {
-    const proximaData = new Date();
-    proximaData.setDate(proximaData.getDate() + 1);
-    await updateDoc(docRef, {
-      intervalo: 1, facilidade, repeticoes: repeticoes + 1,
-      proximaRevisao: Timestamp.fromDate(proximaData),
-    });
+    // No modo diário, apenas registra e agenda para amanhã
+    const prox = new Date();
+    prox.setDate(prox.getDate() + 1);
+    await updateDoc(docRef, { repeticoes: repeticoes + 1, proximaRevisao: Timestamp.fromDate(prox) });
     return;
   }
 
@@ -327,13 +272,9 @@ export const atualizarFlashcard = async (
     facilidade = facilidade + 0.1;
   }
 
-  const proximaData = new Date();
-  proximaData.setDate(proximaData.getDate() + intervalo);
-
-  await updateDoc(docRef, {
-    intervalo, facilidade, repeticoes,
-    proximaRevisao: Timestamp.fromDate(proximaData),
-  });
+  const prox = new Date();
+  prox.setDate(prox.getDate() + intervalo);
+  await updateDoc(docRef, { intervalo, facilidade, repeticoes, proximaRevisao: Timestamp.fromDate(prox) });
 };
 
 // ==================== HISTÓRICO ====================
@@ -377,9 +318,11 @@ export const buscarHistoricoDoUsuario = async (userId: string): Promise<Historic
 };
 
 export const calcularEstatisticas = async (userId: string) => {
-  const historico = await buscarHistoricoDoUsuario(userId);
-  const materiais = await buscarMateriaisDoUsuario(userId);
-  const flashcardsPendentes = await buscarFlashcardsPendentes(userId);
+  const [historico, materiais, flashcardsPendentes] = await Promise.all([
+    buscarHistoricoDoUsuario(userId),
+    buscarMateriaisDoUsuario(userId),
+    buscarFlashcardsPendentes(userId),
+  ]);
 
   const totalRespostas = historico.length;
   const acertos = historico.filter((h) => h.acertou).length;

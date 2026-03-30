@@ -25,10 +25,7 @@ const EstudoMaterial = () => {
         setMaterial(dados);
         setTotalFlashcards(flashcards.length);
       } catch { /* silent */ }
-      finally {
-        setCarregando(false);
-        setTimeout(() => setVisible(true), 100);
-      }
+      finally { setCarregando(false); setTimeout(() => setVisible(true), 100); }
     };
     carregar();
   }, [materialId, usuario]);
@@ -53,9 +50,7 @@ const EstudoMaterial = () => {
         <Navbar />
         <span className="text-4xl">😕</span>
         <p className="text-muted-foreground">Material não encontrado.</p>
-        <button onClick={() => navigate("/estudos")} className="text-violet-400 hover:underline text-sm">
-          ← Voltar para Estudos
-        </button>
+        <button onClick={() => navigate("/estudos")} className="text-violet-400 hover:underline text-sm">← Estudos</button>
       </div>
     );
   }
@@ -63,8 +58,6 @@ const EstudoMaterial = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="fixed inset-0 grid-pattern opacity-20 pointer-events-none" />
-      <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-violet-600/5 rounded-full blur-[120px] pointer-events-none" />
-
       <Navbar />
 
       <main className="relative mx-auto max-w-4xl px-4 pt-24 pb-16">
@@ -84,100 +77,67 @@ const EstudoMaterial = () => {
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-4">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-500 flex items-center justify-center text-2xl shadow-2xl shrink-0"
-                style={{ boxShadow: "0 0 30px rgba(139,92,246,0.4)" }}>
-                📖
-              </div>
+                style={{ boxShadow: "0 0 30px rgba(139,92,246,0.4)" }}>📖</div>
               <div>
-                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
-                  {material.titulo}
-                </h1>
+                <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>{material.titulo}</h1>
                 <p className="text-muted-foreground mt-1 text-sm">
                   {material.assuntos?.length || 0} assunto{(material.assuntos?.length || 0) !== 1 ? "s" : ""} · {totalFlashcards} flashcard{totalFlashcards !== 1 ? "s" : ""}
                 </p>
               </div>
             </div>
-
-            {/* Botões de ação do material */}
             <div className="flex gap-2 shrink-0">
-              {/* Ver flashcards panorâmico */}
-              <button
-                onClick={() => navigate(`/flashcards/material/${materialId}`)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all border border-blue-500/20 bg-blue-500/8 text-blue-400 hover:border-blue-500/40 hover:bg-blue-500/15"
-                title="Ver todos os flashcards deste material"
-              >
+              <button onClick={() => navigate(`/flashcards/material/${materialId}`)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all border border-blue-500/20 bg-blue-500/8 text-blue-400 hover:border-blue-500/40 hover:bg-blue-500/15">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                 </svg>
-                Ver flashcards
+                <span className="hidden sm:inline">Flashcards</span>
                 {totalFlashcards > 0 && (
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold">
-                    {totalFlashcards}
-                  </span>
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold">{totalFlashcards}</span>
                 )}
               </button>
-
-              {/* Revisar flashcards */}
-              <button
-                onClick={() => navigate("/flashcards")}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all border border-violet-500/20 bg-violet-500/8 text-violet-400 hover:border-violet-500/40 hover:bg-violet-500/15"
-                title="Ir para revisão de flashcards"
-              >
-                🃏 Revisar
+              <button onClick={() => navigate("/flashcards")}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all border border-violet-500/20 bg-violet-500/8 text-violet-400 hover:border-violet-500/40">
+                🃏 <span className="hidden sm:inline">Revisar</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Subjects Grid */}
+        {/* Subjects Grid — somente títulos, sem descrição */}
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-5">
-            Escolha um assunto para estudar
+            Escolha um assunto
           </h2>
-
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {(material.assuntos || []).map((assunto, idx) => (
               <div
                 key={assunto.id}
                 className="group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/50 cursor-pointer transition-all duration-300 card-hover opacity-0 animate-fade-in-up"
-                style={{ animationDelay: `${idx * 100}ms`, animationFillMode: "forwards" }}
+                style={{ animationDelay: `${idx * 80}ms`, animationFillMode: "forwards" }}
                 onClick={() => navigate(`/estudo/${materialId}/${assunto.id}`)}
               >
                 <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.1) 0%, rgba(99,102,241,0.05) 100%)" }} />
                 <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-600 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
 
-                <div className="relative p-6">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 group-hover:scale-110 transition-transform"
-                      style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
-                      {idx + 1}
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-white text-sm" style={{ fontFamily: "Syne, sans-serif" }}>
-                        {assunto.titulo}
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                        {assunto.descricao}
-                      </p>
+                <div className="relative p-5 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-violet-400 shrink-0 group-hover:scale-110 transition-transform"
+                    style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-white text-sm truncate" style={{ fontFamily: "Syne, sans-serif" }}>
+                      {assunto.titulo}
+                    </h3>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/15">⚡ Flash</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/15">🎯 Concurso</span>
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-between pt-3 border-t border-white/5">
-                    <div className="flex gap-2">
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/15">
-                        Questões
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/15">
-                        Flashcards
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 text-violet-400">
-                      <span className="text-xs font-medium">Estudar</span>
-                      <svg className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
-                  </div>
+                  <svg className="w-4 h-4 text-muted-foreground group-hover:text-violet-400 group-hover:translate-x-0.5 transition-all shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
                 </div>
               </div>
             ))}
