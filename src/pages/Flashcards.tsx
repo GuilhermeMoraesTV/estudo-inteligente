@@ -14,9 +14,8 @@ import Navbar from "../components/Navbar";
 
 type ModoRevisao = "espacada" | "diaria";
 
-// Agrupar por material + assunto
 interface GrupoAssunto {
-  chave: string; // materialId + assuntoId
+  chave: string;
   materialId: string;
   materialTitulo: string;
   assuntoId: string;
@@ -178,7 +177,7 @@ const FlashcardSession = ({
         } else {
           setConcluido(true);
         }
-      }, 400); // tempo para o flip terminar
+      }, 400);
     }, 150);
   };
 
@@ -329,7 +328,6 @@ const Flashcards = () => {
 
         const pendentesIds = new Set(pendentes.map((p) => p.id));
 
-        // Agrupar por materialId + assuntoId (chave composta para evitar mistura)
         const mapa = new Map<string, GrupoAssunto>();
         for (const fc of todos) {
           const chave = `${fc.materialId || "sem-material"}__${fc.assuntoId || "sem-assunto"}`;
@@ -353,7 +351,6 @@ const Flashcards = () => {
 
         setGrupos(
           Array.from(mapa.values()).sort((a, b) => {
-            // Ordenar: primeiro por material, depois por assunto
             if (a.materialTitulo !== b.materialTitulo) return a.materialTitulo.localeCompare(b.materialTitulo);
             return b.pendentes - a.pendentes;
           })
@@ -424,7 +421,6 @@ const Flashcards = () => {
 
   if (grupos.length === 0) return <EmptyState navigate={navigate} />;
 
-  // Agrupar por material para exibição
   const materiaisUnicos = Array.from(new Set(grupos.map((g) => g.materialId)));
 
   return (
@@ -480,7 +476,7 @@ const Flashcards = () => {
                 {/* Header do material */}
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/20 flex items-center justify-center text-sm">📖</div>
-                  <h2 className="text-sm font-bold text-white truncate" style={{ fontFamily: "Syne, sans-serif" }}>
+                  <h2 className="text-sm font-bold text-white truncate flex-1" style={{ fontFamily: "Syne, sans-serif" }}>
                     {materialTitulo}
                   </h2>
                   {totalPendentesMaterial > 0 && (
@@ -488,13 +484,13 @@ const Flashcards = () => {
                       {totalPendentesMaterial} pendente{totalPendentesMaterial !== 1 ? "s" : ""}
                     </span>
                   )}
-                  {/* Link para ver flashcards panorâmico */}
+                  {/* Botão "Ver todos" DESTACADO */}
                   {materialId && (
                     <button
                       onClick={() => navigate(`/flashcards/material/${materialId}`)}
-                      className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-violet-400 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:border-violet-500/50 hover:text-violet-300 hover:scale-105 active:scale-95"
                     >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16" />
                       </svg>
                       Ver todos

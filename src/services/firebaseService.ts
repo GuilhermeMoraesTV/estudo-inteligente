@@ -1,5 +1,3 @@
-// Serviço centralizado para operações no Firebase Firestore.
-
 import {
   collection,
   doc,
@@ -12,6 +10,7 @@ import {
   Timestamp,
   updateDoc,
   deleteDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebaseConfig";
 
@@ -24,7 +23,7 @@ export interface PerfilUsuario {
   email: string;
   nome: string;
   criadoEm: Timestamp;
-  modoRevisao?: "espacada" | "diaria"; // SM-2 ou revisão diária
+  modoRevisao?: "espacada" | "diaria";
 }
 
 export const criarPerfilUsuario = async (uid: string, email: string, nome: string) => {
@@ -40,7 +39,14 @@ export const buscarPerfilUsuario = async (uid: string): Promise<PerfilUsuario | 
 };
 
 export const atualizarModoRevisao = async (uid: string, modo: "espacada" | "diaria") => {
-  await updateDoc(doc(db, "users", uid), { modoRevisao: modo });
+  const docRef = doc(db, "users", uid);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    await updateDoc(docRef, { modoRevisao: modo });
+  } else {
+    // Criar perfil básico se não existir
+    await setDoc(docRef, { uid, modoRevisao: modo, criadoEm: Timestamp.now() }, { merge: true });
+  }
 };
 
 // ==================== MATERIAIS ====================
@@ -91,30 +97,37 @@ export const buscarMaterialPorId = async (materialId: string): Promise<Material 
   return docSnap.exists() ? ({ id: docSnap.id, ...docSnap.data() } as Material) : null;
 };
 
+// CORRIGIDO: usa writeBatch para exclusão em lote de forma confiável
 export const excluirMaterial = async (materialId: string, userId: string): Promise<void> => {
-  // Exclui o material
+  // 1. Excluir o documento do material
   await deleteDoc(doc(db, "materiais", materialId));
 
-  // Exclui questões associadas
+  // 2. Buscar e excluir questões associadas em lote
   const qQuestoes = query(
     collection(db, "questoes"),
     where("userId", "==", userId),
     where("materialId", "==", materialId)
   );
   const snapQuestoes = await getDocs(qQuestoes);
-  for (const d of snapQuestoes.docs) {
-    await deleteDoc(d.ref);
+
+  if (snapQuestoes.docs.length > 0) {
+    const batchQuestoes = writeBatch(db);
+    snapQuestoes.docs.forEach((d) => batchQuestoes.delete(d.ref));
+    await batchQuestoes.commit();
   }
 
-  // Exclui flashcards associados
+  // 3. Buscar e excluir flashcards associados em lote
   const qFlash = query(
     collection(db, "flashcards"),
     where("userId", "==", userId),
     where("materialId", "==", materialId)
   );
   const snapFlash = await getDocs(qFlash);
-  for (const d of snapFlash.docs) {
-    await deleteDoc(d.ref);
+
+  if (snapFlash.docs.length > 0) {
+    const batchFlash = writeBatch(db);
+    snapFlash.docs.forEach((d) => batchFlash.delete(d.ref));
+    await batchFlash.commit();
   }
 };
 
@@ -292,7 +305,6 @@ export const atualizarFlashcard = async (
   let { intervalo, facilidade, repeticoes } = dados;
 
   if (modoRevisao === "diaria") {
-    // Revisão diária: sempre agenda para amanhã
     const proximaData = new Date();
     proximaData.setDate(proximaData.getDate() + 1);
     await updateDoc(docRef, {
@@ -302,7 +314,7 @@ export const atualizarFlashcard = async (
     return;
   }
 
-  // SM-2 (espaçada)
+  // SM-2
   if (qualidade === 0) {
     intervalo = 1; repeticoes = 0; facilidade = Math.max(1.3, facilidade - 0.2);
   } else if (qualidade === 1) {
@@ -388,5 +400,5 @@ export const calcularEstatisticas = async (userId: string) => {
   };
 };
 
-// Alias para compatibilidade
+// Alias de compatibilidade
 export const gerarReforcoParaQuestao = async () => ({ questoes: [], flashcards: [] });

@@ -11,8 +11,8 @@ import Navbar from "../components/Navbar";
 
 type TipoEstudo = "simples" | "elaborada";
 
-// ---- Toast flutuante ----
-const ToastFlashcard = ({ visivel, onClose }: { visivel: boolean; onClose: () => void }) => {
+// ---- Toast flutuante de reforço ----
+const ToastReforco = ({ visivel, onClose }: { visivel: boolean; onClose: () => void }) => {
   useEffect(() => {
     if (visivel) {
       const t = setTimeout(onClose, 4000);
@@ -27,22 +27,20 @@ const ToastFlashcard = ({ visivel, onClose }: { visivel: boolean; onClose: () =>
       <div
         className="flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl"
         style={{
-          background: "rgba(20, 18, 40, 0.95)",
-          border: "1px solid rgba(139, 92, 246, 0.4)",
+          background: "rgba(20, 18, 40, 0.97)",
+          border: "1px solid rgba(139, 92, 246, 0.5)",
           backdropFilter: "blur(20px)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 30px rgba(139,92,246,0.15)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 30px rgba(139,92,246,0.2)",
         }}
       >
-        <div className="flex gap-1">
-          <div className="ai-loading-dot" style={{ background: "#a78bfa" }} />
-          <div className="ai-loading-dot" style={{ background: "#a78bfa" }} />
-          <div className="ai-loading-dot" style={{ background: "#a78bfa" }} />
+        <div className="w-8 h-8 rounded-xl bg-violet-500/20 flex items-center justify-center text-sm animate-brain-pulse">
+          🧠
         </div>
         <div>
           <p className="text-sm font-semibold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
-            IA criando flashcards...
+            Reforço gerado com IA!
           </p>
-          <p className="text-xs text-muted-foreground">Serão adicionados à sua coleção</p>
+          <p className="text-xs text-muted-foreground">Flashcards adicionados à sua coleção</p>
         </div>
         <button onClick={onClose} className="ml-2 text-muted-foreground hover:text-white transition-colors">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -54,75 +52,137 @@ const ToastFlashcard = ({ visivel, onClose }: { visivel: boolean; onClose: () =>
   );
 };
 
-// ---- Explicação formatada ----
+// ---- Helpers para parsear explicação ----
+function parseExplicacao(texto: string): Array<{ tipo: "correta" | "errada" | "conceito" | "dica" | "texto"; conteudo: string }> {
+  if (!texto) return [];
+
+  // Remover duplicatas: se o texto contém a mesma explicação duas vezes, usar apenas uma
+  const metade = Math.floor(texto.length / 2);
+  if (texto.length > 100) {
+    const primeiraMetade = texto.substring(0, metade);
+    const segundaMetade = texto.substring(metade);
+    // Detecta duplicata exata ou quase exata
+    if (segundaMetade.trim().startsWith(primeiraMetade.trim().substring(0, 50))) {
+      texto = primeiraMetade.trim();
+    }
+  }
+
+  // Separar por marcadores especiais ou por linhas
+  const linhas = texto.split(/\n/).filter((l) => l.trim());
+
+  if (linhas.length <= 1) {
+    // Tentar split por emojis de marcador
+    const splitted = texto
+      .replace(/(✅|❌|📌|💡)/g, "\n$1")
+      .split("\n")
+      .filter((l) => l.trim());
+    if (splitted.length > 1) {
+      return parseLinhas(splitted);
+    }
+    return [{ tipo: "texto", conteudo: texto.trim() }];
+  }
+
+  return parseLinhas(linhas);
+}
+
+function parseLinhas(linhas: string[]): Array<{ tipo: "correta" | "errada" | "conceito" | "dica" | "texto"; conteudo: string }> {
+  return linhas.map((linha) => {
+    const l = linha.trim();
+    if (l.startsWith("✅")) return { tipo: "correta" as const, conteudo: l.replace(/^✅\s*/, "") };
+    if (l.startsWith("❌")) return { tipo: "errada" as const, conteudo: l.replace(/^❌\s*/, "") };
+    if (l.startsWith("📌")) return { tipo: "conceito" as const, conteudo: l.replace(/^📌\s*/, "") };
+    if (l.startsWith("💡")) return { tipo: "dica" as const, conteudo: l.replace(/^💡\s*/, "") };
+    return { tipo: "texto" as const, conteudo: l };
+  });
+}
+
+// ---- Explicação formatada bonita ----
 const ExplicacaoFormatada = ({ texto, tipo }: { texto: string; tipo: TipoEstudo }) => {
+  const partes = parseExplicacao(texto);
+
   if (tipo === "elaborada") {
-    // Renderiza com formatação para modo concurso
-    const linhas = texto.split("\n").filter(Boolean);
     return (
       <div className="space-y-2">
-        {linhas.map((linha, i) => {
-          const isCorreta = linha.startsWith("✅");
-          const isErrada = linha.startsWith("❌");
-          const isConceito = linha.startsWith("📌");
-          const isDica = linha.startsWith("💡");
-
+        {partes.map((parte, i) => {
+          if (parte.tipo === "correta") {
+            return (
+              <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.2)" }}>
+                <span className="text-success text-base shrink-0 mt-0.5">✅</span>
+                <span className="text-sm leading-relaxed text-success font-medium">{parte.conteudo}</span>
+              </div>
+            );
+          }
+          if (parte.tipo === "errada") {
+            return (
+              <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <span className="text-white/40 text-base shrink-0 mt-0.5">❌</span>
+                <span className="text-sm leading-relaxed text-white/55">{parte.conteudo}</span>
+              </div>
+            );
+          }
+          if (parte.tipo === "conceito") {
+            return (
+              <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.25)" }}>
+                <span className="text-violet-400 text-base shrink-0 mt-0.5">📌</span>
+                <span className="text-sm leading-relaxed text-violet-300 font-semibold">{parte.conteudo}</span>
+              </div>
+            );
+          }
+          if (parte.tipo === "dica") {
+            return (
+              <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+                <span className="text-yellow-400 text-base shrink-0 mt-0.5">💡</span>
+                <span className="text-sm leading-relaxed text-yellow-300">{parte.conteudo}</span>
+              </div>
+            );
+          }
           return (
-            <div
-              key={i}
-              className={`flex items-start gap-2 px-3 py-2 rounded-xl text-sm leading-relaxed ${
-                isCorreta ? "bg-success/10 border border-success/20" :
-                isErrada ? "bg-white/3 border border-white/5" :
-                isConceito ? "bg-violet-500/10 border border-violet-500/20" :
-                isDica ? "bg-yellow-500/10 border border-yellow-500/20" :
-                "text-white/80"
-              }`}
-            >
-              <span className="text-base leading-none mt-0.5 shrink-0">
-                {isCorreta ? "✅" : isErrada ? "❌" : isConceito ? "📌" : isDica ? "💡" : ""}
-              </span>
-              <span className={`${
-                isCorreta ? "text-success font-medium" :
-                isErrada ? "text-white/60" :
-                isConceito ? "text-violet-300 font-medium" :
-                isDica ? "text-yellow-300" :
-                "text-white/80"
-              }`}>
-                {linha.replace(/^[✅❌📌💡]\s*/, "")}
-              </span>
-            </div>
+            <p key={i} className="text-sm leading-relaxed text-white/75 px-1">{parte.conteudo}</p>
           );
         })}
-        {linhas.length === 1 && (
-          <p className="text-sm leading-relaxed text-white/80 px-1">{texto}</p>
-        )}
       </div>
     );
   }
 
-  // Modo flash — renderiza conciso
-  const linhas = texto.split("\n").filter(Boolean);
+  // Modo flash — mais compacto
   return (
-    <div className="space-y-1.5">
-      {linhas.map((linha, i) => {
-        const isCorreta = linha.startsWith("✅");
-        const isConceito = linha.startsWith("📌");
-        const isDica = linha.startsWith("💡");
+    <div className="space-y-2">
+      {partes.map((parte, i) => {
+        if (parte.tipo === "correta") {
+          return (
+            <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg"
+              style={{ background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <span className="text-success text-sm shrink-0">✅</span>
+              <span className="text-sm text-success font-medium leading-relaxed">{parte.conteudo}</span>
+            </div>
+          );
+        }
+        if (parte.tipo === "conceito") {
+          return (
+            <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg"
+              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.15)" }}>
+              <span className="text-violet-400 text-sm shrink-0">📌</span>
+              <span className="text-sm text-violet-300 leading-relaxed">{parte.conteudo}</span>
+            </div>
+          );
+        }
+        if (parte.tipo === "dica") {
+          return (
+            <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg"
+              style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)" }}>
+              <span className="text-yellow-400 text-sm shrink-0">💡</span>
+              <span className="text-sm text-yellow-300 leading-relaxed">{parte.conteudo}</span>
+            </div>
+          );
+        }
         return (
-          <div key={i} className={`flex items-start gap-2 text-sm ${
-            isCorreta ? "text-success font-medium" :
-            isConceito ? "text-violet-300" :
-            isDica ? "text-yellow-300" :
-            "text-white/80"
-          }`}>
-            {(isCorreta || isConceito || isDica) && (
-              <span className="shrink-0">{isCorreta ? "✅" : isConceito ? "📌" : "💡"}</span>
-            )}
-            <span>{linha.replace(/^[✅📌💡]\s*/, "")}</span>
-          </div>
+          <p key={i} className="text-sm leading-relaxed text-white/75">{parte.conteudo}</p>
         );
       })}
-      {linhas.length === 0 && <p className="text-sm text-white/80">{texto}</p>}
     </div>
   );
 };
@@ -264,6 +324,57 @@ const OptionButton = ({ alternativa, index, respondida, selecionada, correta, on
   );
 };
 
+// ---- Botão de Revisar (no cabeçalho da questão) ----
+const BotaoRevisar = ({ onRevisar, gerandoReforco, reforcoGerado }: {
+  onRevisar: () => void;
+  gerandoReforco: boolean;
+  reforcoGerado: boolean;
+}) => {
+  return (
+    <button
+      onClick={onRevisar}
+      disabled={gerandoReforco || reforcoGerado}
+      className={`
+        relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+        transition-all duration-300 overflow-hidden
+        ${reforcoGerado
+          ? "bg-success/15 border border-success/40 text-success cursor-default"
+          : gerandoReforco
+            ? "bg-violet-500/10 border border-violet-500/30 text-violet-400 cursor-wait"
+            : "bg-yellow-500/10 border border-yellow-500/25 text-yellow-400 hover:bg-yellow-500/20 hover:border-yellow-500/50 hover:scale-105 active:scale-95"
+        }
+      `}
+      title="Gerar questões e flashcards de reforço para este tópico"
+    >
+      {/* Shimmer animado enquanto gera */}
+      {gerandoReforco && (
+        <span className="absolute inset-0 animate-shimmer opacity-30 rounded-lg" />
+      )}
+
+      {gerandoReforco ? (
+        <>
+          <div className="w-3 h-3 rounded-full border border-violet-400/60 border-t-violet-400 animate-spin" />
+          <span>Gerando...</span>
+        </>
+      ) : reforcoGerado ? (
+        <>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+          <span>Reforço salvo!</span>
+        </>
+      ) : (
+        <>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          <span>Revisar</span>
+        </>
+      )}
+    </button>
+  );
+};
+
 // ---- Resultado ----
 const ResultScreen = ({ acertos, total, navigate, materialId, assuntoId }: {
   acertos: number; total: number; navigate: (p: string) => void; materialId: string; assuntoId: string;
@@ -370,7 +481,8 @@ const Estudo = () => {
   const [acertos, setAcertos] = useState(0);
   const [totalRespondidas, setTotalRespondidas] = useState(0);
   const [gerandoReforco, setGerandoReforco] = useState(false);
-  const [showToastFlashcard, setShowToastFlashcard] = useState(false);
+  const [reforcoGerado, setReforcoGerado] = useState(false);
+  const [showToastReforco, setShowToastReforco] = useState(false);
   const tempoInicio = useRef<number>(Date.now());
 
   useEffect(() => {
@@ -460,18 +572,20 @@ const Estudo = () => {
     }
   };
 
-  const handleGerarReforco = async () => {
-    if (!usuario || !assuntoAtual || !materialId || !questoes[indiceAtual]) return;
+  // Gerar reforço em background sem bloquear o fluxo
+  const handleGerarReforco = useCallback(async () => {
+    if (!usuario || !assuntoAtual || !materialId || !questoes[indiceAtual] || gerandoReforco || reforcoGerado) return;
     setGerandoReforco(true);
-    setShowToastFlashcard(true);
     try {
       const q = questoes[indiceAtual];
       const reforco = await gerarReforcoParaQuestao(q.pergunta, q.assuntoTitulo);
       await salvarQuestoes(usuario.uid, materialId, q.assuntoId, q.assuntoTitulo, reforco.questoes);
       await salvarFlashcards(usuario.uid, materialId, q.assuntoId, q.assuntoTitulo, reforco.flashcards, "gerado", material?.titulo);
+      setReforcoGerado(true);
+      setShowToastReforco(true);
     } catch { /* silent */ }
     finally { setGerandoReforco(false); }
-  };
+  }, [usuario, assuntoAtual, materialId, questoes, indiceAtual, gerandoReforco, reforcoGerado, material]);
 
   const handleProxima = () => {
     if (indiceAtual < questoes.length - 1) {
@@ -479,6 +593,7 @@ const Estudo = () => {
       setRespostaSelecionada(null);
       setRespondida(false);
       setShowExplanation(false);
+      setReforcoGerado(false);
       tempoInicio.current = Date.now();
     } else {
       setSessaoFinalizada(true);
@@ -525,9 +640,9 @@ const Estudo = () => {
       <div className="fixed inset-0 grid-pattern opacity-15 pointer-events-none" />
       <Navbar />
 
-      <ToastFlashcard
-        visivel={showToastFlashcard}
-        onClose={() => setShowToastFlashcard(false)}
+      <ToastReforco
+        visivel={showToastReforco}
+        onClose={() => setShowToastReforco(false)}
       />
 
       <main className="relative mx-auto max-w-2xl px-4 pt-24 pb-16">
@@ -561,28 +676,21 @@ const Estudo = () => {
           </div>
         </div>
 
-        {/* Question */}
+        {/* Question Card com botão de revisar no cabeçalho */}
         <div key={`${assuntoAtual.id}-${indiceAtual}`} className="glass-strong rounded-3xl p-7 mb-5 animate-scale-in" style={{ border: "1px solid rgba(139,92,246,0.15)" }}>
+          {/* Cabeçalho da questão com badge e botão de revisar */}
           <div className="flex items-center justify-between mb-4">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-500/15 border border-violet-500/25 text-violet-400 text-xs font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
               {assuntoAtual.titulo} · Questão {indiceAtual + 1}
             </span>
-            {/* Botão Revisar junto ao card */}
-            <button
-              onClick={handleGerarReforco}
-              disabled={gerandoReforco}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border border-yellow-500/20 bg-yellow-500/8 text-yellow-500/70 hover:border-yellow-500/40 hover:text-yellow-400 hover:bg-yellow-500/15 disabled:opacity-40"
-            >
-              {gerandoReforco ? (
-                <div className="w-3 h-3 rounded-full border border-yellow-400/50 border-t-yellow-400 animate-spin" />
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-              )}
-              Revisar
-            </button>
+
+            {/* Botão Revisar visível e destaque junto ao título */}
+            <BotaoRevisar
+              onRevisar={handleGerarReforco}
+              gerandoReforco={gerandoReforco}
+              reforcoGerado={reforcoGerado}
+            />
           </div>
 
           <h2 className="text-base leading-relaxed text-white/95 font-medium mb-6" style={{ lineHeight: "1.7" }}>
@@ -600,10 +708,10 @@ const Estudo = () => {
           </div>
         </div>
 
-        {/* Explanation formatada */}
+        {/* Explicação formatada visualmente */}
         {respondida && showExplanation && (
           <div className="glass rounded-2xl p-5 mb-5 animate-fade-in-up border border-violet-500/15">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-4">
               <div className="w-6 h-6 rounded-lg bg-violet-500/20 flex items-center justify-center text-xs">💡</div>
               <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider">
                 {tipoEstudo === "elaborada" ? "Análise detalhada" : "Explicação"}

@@ -38,17 +38,18 @@ const Estudos = () => {
     e.stopPropagation();
     if (confirmarExclusao === materialId) {
       setExcluindo(materialId);
+      setConfirmarExclusao(null);
       try {
         await excluirMaterial(materialId, usuario!.uid);
         setMateriais((prev) => prev.filter((m) => m.id !== materialId));
-      } catch { /* silent */ }
-      finally {
+      } catch (err) {
+        console.error("Erro ao excluir material:", err);
+      } finally {
         setExcluindo(null);
-        setConfirmarExclusao(null);
       }
     } else {
       setConfirmarExclusao(materialId);
-      setTimeout(() => setConfirmarExclusao(null), 3000);
+      setTimeout(() => setConfirmarExclusao((cur) => (cur === materialId ? null : cur)), 3000);
     }
   };
 
@@ -132,7 +133,7 @@ const Estudos = () => {
             {materiais.map((material, idx) => (
               <div
                 key={material.id}
-                className={`group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/40 transition-all duration-300 card-hover opacity-0 animate-fade-in-up`}
+                className="group relative overflow-hidden rounded-2xl border border-white/10 hover:border-violet-500/40 transition-all duration-300 card-hover opacity-0 animate-fade-in-up"
                 style={{ animationDelay: `${idx * 80}ms`, animationFillMode: "forwards" }}
               >
                 {/* Hover overlay */}
@@ -169,7 +170,7 @@ const Estudos = () => {
                           ? "bg-red-500/20 border border-red-500/50 text-red-400"
                           : "opacity-0 group-hover:opacity-100 bg-white/5 border border-white/10 text-muted-foreground hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400"
                       }`}
-                      title={confirmarExclusao === material.id ? "Clique para confirmar" : "Excluir material"}
+                      title={confirmarExclusao === material.id ? "Clique para confirmar exclusão" : "Excluir material"}
                     >
                       {excluindo === material.id ? (
                         <div className="w-3 h-3 rounded-full border border-red-400/50 border-t-red-400 animate-spin" />

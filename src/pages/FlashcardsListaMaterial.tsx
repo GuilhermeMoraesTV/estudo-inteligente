@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { buscarFlashcardsPorMaterial, buscarMaterialPorId, Flashcard, Material } from "../services/firebaseService";
 import Navbar from "../components/Navbar";
 
-// ---- Card panorâmico ----
+// ---- Card panorâmico — mostra só a frente ----
 const FlashcardPanoramico = ({
   flashcard,
   onClicar,
@@ -27,11 +27,11 @@ const FlashcardPanoramico = ({
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-600 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
 
       <div className="relative p-4">
-        {/* Header do card */}
+        {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className={`w-2 h-2 rounded-full ${pendente ? "bg-yellow-400 animate-pulse" : "bg-success"}`} />
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium truncate max-w-[120px]">
               {flashcard.assuntoTitulo}
             </span>
           </div>
@@ -42,39 +42,36 @@ const FlashcardPanoramico = ({
               </span>
             )}
             {pendente && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 border border-yellow-500/20 animate-pulse">
                 Pendente
               </span>
             )}
           </div>
         </div>
 
-        {/* Frente */}
-        <div className="mb-2">
-          <p className="text-xs text-muted-foreground mb-1 font-medium">FRENTE</p>
-          <p className="text-sm text-white font-medium leading-relaxed line-clamp-2">
+        {/* Somente a FRENTE do card */}
+        <div className="mb-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="w-5 h-5 rounded-md bg-violet-500/20 flex items-center justify-center">
+              <svg className="w-2.5 h-2.5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </span>
+            <p className="text-[9px] text-violet-400/70 font-semibold uppercase tracking-wider">Pergunta</p>
+          </div>
+          <p className="text-sm text-white font-medium leading-relaxed line-clamp-3">
             {flashcard.frente}
           </p>
         </div>
 
-        {/* Verso (preview) */}
-        <div className="border-t border-white/5 pt-2 mt-2">
-          <p className="text-xs text-muted-foreground mb-1 font-medium">VERSO</p>
-          <p className="text-xs text-white/60 leading-relaxed line-clamp-2">
-            {flashcard.verso}
-          </p>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-[10px] text-muted-foreground">
-            Repetições: {flashcard.repeticoes}
-          </span>
-          <span className="text-[10px] text-violet-400 group-hover:text-violet-300 transition-colors flex items-center gap-1">
-            Estudar
-            <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+        {/* Hint de que há resposta oculta */}
+        <div className="flex items-center gap-1.5 pt-2 border-t border-white/5">
+          <svg className="w-3 h-3 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+          </svg>
+          <span className="text-[10px] text-muted-foreground/50">Clique para ver a resposta</span>
+          <span className="ml-auto text-[10px] text-muted-foreground/40">
+            {flashcard.repeticoes}× revisado
           </span>
         </div>
       </div>
@@ -99,7 +96,7 @@ const ModalEstudoFlashcard = ({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)" }}
+      style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(16px)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onFechar(); }}
     >
       <div className="w-full max-w-lg animate-scale-in">
@@ -136,7 +133,7 @@ const ModalEstudoFlashcard = ({
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                     </svg>
-                    Clique para revelar
+                    Clique para revelar a resposta
                   </span>
                 </div>
               )}
@@ -158,7 +155,7 @@ const ModalEstudoFlashcard = ({
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-4">
-          Clique no card para {virado ? "ver a frente" : "revelar a resposta"}
+          Clique no card para {virado ? "ver a pergunta" : "revelar a resposta"}
         </p>
       </div>
     </div>
@@ -198,7 +195,6 @@ const FlashcardsListaMaterial = () => {
     carregar();
   }, [usuario, materialId]);
 
-  // Assuntos únicos
   const assuntos = Array.from(new Set(flashcards.map((f) => f.assuntoTitulo)));
 
   const flashcardsFiltrados = flashcards.filter((f) => {
@@ -245,21 +241,25 @@ const FlashcardsListaMaterial = () => {
         {/* Header */}
         <div className={`mb-8 transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}>
           <span className="text-xs font-medium text-violet-400 uppercase tracking-widest">Visão Panorâmica</span>
-          <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center justify-between mt-2 gap-4">
             <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "Syne, sans-serif" }}>
               Flashcards — {material?.titulo}
             </h1>
             <button
               onClick={() => navigate("/flashcards")}
-              className="btn-primary px-4 py-2 rounded-xl text-sm font-bold text-white flex items-center gap-2"
+              className="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 shrink-0"
             >
-              🃏 Revisar
+              <span>🃏</span>
+              Revisar Agora
             </button>
           </div>
           <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
             <span>{flashcards.length} flashcard{flashcards.length !== 1 ? "s" : ""} total</span>
             {totalPendentes > 0 && (
-              <span className="text-yellow-400">{totalPendentes} pendente{totalPendentes !== 1 ? "s" : ""}</span>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                {totalPendentes} pendente{totalPendentes !== 1 ? "s" : ""}
+              </span>
             )}
           </div>
         </div>
