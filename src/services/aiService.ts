@@ -1,11 +1,22 @@
-// Serviço centralizado para chamadas à API da IA via Firebase.
-// Suporta busca na web para textos curtos e análise de assuntos.
-//
-// IMPORTANTE: Não instancie getGenerativeModel() aqui.
-// Importe sempre `geminiModel` do firebaseConfig — ele já usa GoogleAIBackend,
-// que roteia as chamadas pelo próprio Firebase sem expor a chave API ao cliente.
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-import { geminiModel } from "./firebaseConfig";
+async function chamarGemini(prompt: string): Promise<string> {
+  const response = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+    }),
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err?.error?.message || `Erro HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
 
 export interface Assunto {
   id: string;
@@ -33,26 +44,26 @@ export interface RespostaIA {
   flashcards: Array<{ frente: string; verso: string }>;
 }
 
-/**
- * Limpa a resposta da IA e garante que seja um JSON válido.
- */
 function extrairJSON(texto: string): string {
-  try {
-    let limpo = texto.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
-    const inicioObj = limpo.indexOf("{");
-    const fimObj = limpo.lastIndexOf("}");
-    if (inicioObj !== -1 && fimObj !== -1) {
-      return limpo.substring(inicioObj, fimObj + 1);
-    }
-    return limpo;
-  } catch (e) {
-    return texto;
+  let limpo = texto.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+
+  const inicioObj = limpo.indexOf("{");
+  const fimObj = limpo.lastIndexOf("}");
+
+  if (inicioObj !== -1 && fimObj !== -1) {
+    limpo = limpo.substring(inicioObj, fimObj + 1);
   }
+
+  // Corrige vírgulas antes de ] ou }
+  limpo = limpo.replace(/,\s*([}\]])/g, "$1");
+
+  // Corrige strings não fechadas no final
+  limpo = limpo.replace(/,\s*""\s*}/g, "}");
+  limpo = limpo.replace(/,\s*""\s*]/g, "]");
+
+  return limpo;
 }
 
-/**
- * Mapeia assuntos de um texto/arquivo e gera título geral.
- */
 export const mapearAssuntos = async (
   texto: string,
   nomeArquivo?: string
@@ -83,8 +94,7 @@ TEXTO:
 ${texto.substring(0, 6000)}`;
 
   try {
-    const result = await geminiModel.generateContent(prompt);
-    const raw = result.response.text();
+    const raw = await chamarGemini(prompt);
     const json = extrairJSON(raw);
     const dados: RespostaMapaAssuntos = JSON.parse(json);
 
@@ -111,10 +121,6 @@ ${texto.substring(0, 6000)}`;
   }
 };
 
-/**
- * Gera questões e flashcards para um assunto específico.
- * Se o texto for curto, usa conhecimento interno da IA sobre o assunto.
- */
 export const gerarConteudoParaAssunto = async (
   assunto: Assunto,
   tipoQuestao: "simples" | "elaborada" = "elaborada",
@@ -143,7 +149,9 @@ ${instrucaoTipo}
 
 Gere exatamente ${quantidadeQuestoes} questões de múltipla escolha (5 alternativas A, B, C, D, E) e 5 flashcards.
 
-Retorne APENAS este JSON válido (sem markdown):
+IMPORTANTE: Retorne APENAS JSON puro e válido, sem markdown, sem texto antes ou depois.
+Certifique-se que todas as strings estão corretamente fechadas e o JSON está completo.
+
 {
   "resumo": "Resumo dos principais pontos do assunto em 2-3 frases",
   "questoes": [
@@ -164,8 +172,7 @@ Retorne APENAS este JSON válido (sem markdown):
 }`;
 
   try {
-    const result = await geminiModel.generateContent(prompt);
-    const raw = result.response.text();
+    const raw = await chamarGemini(prompt);
     const json = extrairJSON(raw);
     const dados: RespostaIA = JSON.parse(json);
 
@@ -176,13 +183,26 @@ Retorne APENAS este JSON válido (sem markdown):
     return dados;
   } catch (e) {
     console.error("Erro ao gerar conteúdo:", e);
+
+    // Segunda tentativa com prompt mais compacto
+    try {
+      const promptSimples = `Gere ${quantidadeQuestoes} questões sobre "${assunto.titulo}" para concurso público estilo ${tipoQuestao === "elaborada" ? "CESPE" : "simples"}.
+Retorne SOMENTE JSON válido sem texto extra:
+{"resumo":"resumo breve","questoes":[{"pergunta":"pergunta","alternativas":["A) op1","B) op2","C) op3","D) op4","E) op5"],"correta":"A) op1","explicacao":"explicacao","tipo":"${tipoQuestao}"}],"flashcards":[{"frente":"conceito","verso":"definição"}]}`;
+
+      const raw2 = await chamarGemini(promptSimples);
+      const json2 = extrairJSON(raw2);
+      const dados2: RespostaIA = JSON.parse(json2);
+
+      if (dados2.questoes?.length > 0) return dados2;
+    } catch {
+      // fallback final
+    }
+
     return { resumo: "Não foi possível gerar no momento.", questoes: [], flashcards: [] };
   }
 };
 
-/**
- * Gera questões e flashcards extras para reforço (questões erradas).
- */
 export const gerarReforcoParaQuestao = async (
   perguntaOriginal: string,
   assunto: string
@@ -216,8 +236,7 @@ Retorne APENAS este JSON (sem markdown):
 }`;
 
   try {
-    const result = await geminiModel.generateContent(prompt);
-    const raw = result.response.text();
+    const raw = await chamarGemini(prompt);
     const json = extrairJSON(raw);
     return JSON.parse(json);
   } catch {
@@ -225,9 +244,6 @@ Retorne APENAS este JSON (sem markdown):
   }
 };
 
-/**
- * Gera feedback personalizado de desempenho.
- */
 export const gerarFeedbackDesempenho = async (
   taxaAcerto: number,
   temasErrados: string[]
@@ -237,8 +253,7 @@ ${temasErrados.length > 0 ? `Errou em: ${temasErrados.slice(0, 3).join(", ")}.` 
 Feedback breve, motivador e estratégico (máximo 2 frases). Seja direto.`;
 
   try {
-    const result = await geminiModel.generateContent(prompt);
-    return result.response.text().trim();
+    return await chamarGemini(prompt);
   } catch {
     return "Continue praticando! A consistência é a chave para a aprovação.";
   }

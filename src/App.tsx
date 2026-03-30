@@ -13,6 +13,7 @@ import EstudoMaterial from "./pages/EstudoMaterial";
 import Estudo from "./pages/Estudo";
 import Flashcards from "./pages/Flashcards";
 import NotFound from "./pages/NotFound";
+import "./services/testeIA";
 
 const queryClient = new QueryClient();
 
